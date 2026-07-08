@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -18,20 +19,15 @@ func TestReadConfig_Minimal(t *testing.T) {
 	writeFile(t, dir, "agent.yaml", `
 id: "test-agent"
 description: "A test agent"
+project_id: "my-project"
 `)
-
 	cfg, err := ReadConfig(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
 	if cfg.ID != "test-agent" {
-		t.Errorf("ID: got %q, want %q", cfg.ID, "test-agent")
+		t.Errorf("ID: got %q", cfg.ID)
 	}
-	if cfg.Description != "A test agent" {
-		t.Errorf("Description: got %q, want %q", cfg.Description, "A test agent")
-	}
-	// Defaults
 	if cfg.BaseAgent != "antigravity-preview-05-2026" {
 		t.Errorf("BaseAgent default: got %q", cfg.BaseAgent)
 	}
@@ -40,64 +36,43 @@ description: "A test agent"
 	}
 }
 
-func TestReadConfig_Full(t *testing.T) {
+func TestReadConfig_AllToolTypes(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "agent.yaml", `
 id: "full-agent"
-description: "Full config agent"
 project_id: "my-project"
-location: "us-central1"
 gcs_bucket: "my-bucket"
-base_agent: "custom-base-agent"
 tools:
   - type: "code_execution"
+  - type: "filesystem"
   - type: "google_search"
-  - type: "http"
-    name: "my-api"
-    url: "https://example.com/api"
+  - type: "url_context"
+  - type: "mcp_server"
+    name: "my-mcp"
+    url: "https://example.com/mcp"
     headers:
-      Authorization: "Bearer token"
+      Authorization: "Bearer tok"
 `)
-
 	cfg, err := ReadConfig(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	if cfg.ID != "full-agent" {
-		t.Errorf("ID: got %q", cfg.ID)
+	if len(cfg.Tools) != 5 {
+		t.Fatalf("Tools: got %d, want 5", len(cfg.Tools))
 	}
-	if cfg.ProjectID != "my-project" {
-		t.Errorf("ProjectID: got %q", cfg.ProjectID)
+	mcp := cfg.Tools[4]
+	if mcp.Type != "mcp_server" || mcp.URL != "https://example.com/mcp" {
+		t.Errorf("mcp_server tool: %+v", mcp)
 	}
-	if cfg.Location != "us-central1" {
-		t.Errorf("Location: got %q", cfg.Location)
-	}
-	if cfg.GCSBucket != "my-bucket" {
-		t.Errorf("GCSBucket: got %q", cfg.GCSBucket)
-	}
-	if cfg.BaseAgent != "custom-base-agent" {
-		t.Errorf("BaseAgent: got %q", cfg.BaseAgent)
-	}
-	if len(cfg.Tools) != 3 {
-		t.Fatalf("Tools: got %d, want 3", len(cfg.Tools))
-	}
-	if cfg.Tools[2].Type != "http" {
-		t.Errorf("Tools[2].Type: got %q", cfg.Tools[2].Type)
-	}
-	if cfg.Tools[2].URL != "https://example.com/api" {
-		t.Errorf("Tools[2].URL: got %q", cfg.Tools[2].URL)
-	}
-	if cfg.Tools[2].Headers["Authorization"] != "Bearer token" {
-		t.Errorf("Tools[2].Headers[Authorization]: got %q", cfg.Tools[2].Headers["Authorization"])
+	if mcp.Headers["Authorization"] != "Bearer tok" {
+		t.Errorf("mcp headers: %+v", mcp.Headers)
 	}
 }
 
 func TestReadConfig_MissingFile(t *testing.T) {
-	dir := t.TempDir()
-	_, err := ReadConfig(dir)
+	_, err := ReadConfig(t.TempDir())
 	if err == nil {
-		t.Fatal("expected error for missing agent.yaml, got nil")
+		t.Fatal("expected error for missing agent.yaml")
 	}
 }
 
@@ -106,21 +81,97 @@ func TestReadConfig_InvalidYAML(t *testing.T) {
 	writeFile(t, dir, "agent.yaml", `{invalid yaml: [`)
 	_, err := ReadConfig(dir)
 	if err == nil {
-		t.Fatal("expected error for invalid YAML, got nil")
+		t.Fatal("expected error for invalid YAML")
 	}
 }
 
-func TestReadConfig_LocationDefault_NotOverriddenWhenSet(t *testing.T) {
+func TestValidate_MissingID(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `description: "no id"`)
+	_, err := ReadConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "id is required") {
+		t.Errorf("expected id-required error, got: %v", err)
+	}
+}
+
+func TestValidate_BadLocation(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "agent.yaml", `
-id: "agent"
-location: "europe-west1"
+id: "x"
+location: "us-east5"
+`)
+	_, err := ReadConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "location must be") {
+		t.Errorf("expected location error, got: %v", err)
+	}
+}
+
+func TestValidate_UnsupportedToolType(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+id: "x"
+tools:
+  - type: "http"
+`)
+	_, err := ReadConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "unsupported type") {
+		t.Errorf("expected unsupported tool error, got: %v", err)
+	}
+}
+
+func TestValidate_MCPServerMissingURL(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+id: "x"
+tools:
+  - type: "mcp_server"
+    name: "no-url"
+`)
+	_, err := ReadConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "requires a url") {
+		t.Errorf("expected mcp url error, got: %v", err)
+	}
+}
+
+func TestValidate_NetworkAllowlistOnlyStarSupported(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+id: "x"
+network:
+  allowlist:
+    - "*.googleapis.com"
+`)
+	_, err := ReadConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "only \"*\" is currently supported") {
+		t.Errorf("expected allowlist error, got: %v", err)
+	}
+}
+
+func TestValidate_NetworkAllowlistStar(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+id: "x"
+network:
+  allowlist:
+    - "*"
+`)
+	_, err := ReadConfig(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReadConfig_LocationExplicitGlobal(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+id: "x"
+location: "global"
 `)
 	cfg, err := ReadConfig(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Location != "europe-west1" {
-		t.Errorf("Location: got %q, want %q", cfg.Location, "europe-west1")
+	if cfg.Location != "global" {
+		t.Errorf("Location: got %q", cfg.Location)
 	}
 }

@@ -1,5 +1,7 @@
 id: "minimal-agent"
-description: "A minimal agent with search and code execution"
+description: "Search the web and run Python. No file system, no persistence."
+project_id: "alanblount-sandbox"
+
 tools:
-  - type: "code_execution"
   - type: "google_search"
+  - type: "code_execution"

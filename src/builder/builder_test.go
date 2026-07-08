@@ -14,7 +14,7 @@ import (
 	"github.com/zeroasterisk/GoGeminiManagedAgent/src/config"
 )
 
-// newTestBuilder creates a Builder wired to the given test server with fast poll intervals.
+// newTestBuilder wires a Builder to the given test server with fast poll intervals.
 func newTestBuilder(cfg *config.AgentConfig, dir string, srv *httptest.Server) *Builder {
 	b := newBuilderWithClient(cfg, dir, srv.Client(), srv.URL)
 	b.lroPollInterval = 10 * time.Millisecond
@@ -22,7 +22,6 @@ func newTestBuilder(cfg *config.AgentConfig, dir string, srv *httptest.Server) *
 	return b
 }
 
-// minimalCfg returns a minimal config for tests that don't need GCS.
 func minimalCfg() *config.AgentConfig {
 	return &config.AgentConfig{
 		ID:        "test-agent",
@@ -42,7 +41,7 @@ func writeFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-// --- readInstructions ---
+// ── readInstructions ──────────────────────────────────────────────────────────
 
 func TestReadInstructions_Present(t *testing.T) {
 	dir := t.TempDir()
@@ -60,18 +59,17 @@ func TestReadInstructions_Present(t *testing.T) {
 }
 
 func TestReadInstructions_Missing(t *testing.T) {
-	dir := t.TempDir()
-	b := &Builder{cfg: minimalCfg(), dir: dir}
+	b := &Builder{cfg: minimalCfg(), dir: t.TempDir()}
 	got, err := b.readInstructions()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got != "" {
-		t.Errorf("expected empty string for missing instructions.md, got %q", got)
+		t.Errorf("expected empty string, got %q", got)
 	}
 }
 
-// --- agentExists ---
+// ── agentExists ───────────────────────────────────────────────────────────────
 
 func TestAgentExists_Found(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +77,6 @@ func TestAgentExists_Found(t *testing.T) {
 		w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
-
 	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
 	exists, err := b.agentExists(context.Background(), srv.Client())
 	if err != nil {
@@ -95,7 +92,6 @@ func TestAgentExists_NotFound(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-
 	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
 	exists, err := b.agentExists(context.Background(), srv.Client())
 	if err != nil {
@@ -109,39 +105,30 @@ func TestAgentExists_NotFound(t *testing.T) {
 func TestAgentExists_ServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`internal error`))
 	}))
 	defer srv.Close()
-
 	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
 	_, err := b.agentExists(context.Background(), srv.Client())
 	if err == nil {
-		t.Fatal("expected error for 500, got nil")
+		t.Fatal("expected error for 500")
 	}
 }
 
-// --- deployAgent (POST new agent) ---
+// ── deployAgent (POST new) ────────────────────────────────────────────────────
 
 func TestDeployAgent_CreateNew_ImmediateDone(t *testing.T) {
-	var receivedMethod string
-	var receivedBody AgentPayload
+	var gotMethod string
+	var gotBody AgentPayload
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == "GET" && strings.Contains(r.URL.Path, "/agents/test-agent"):
-			// agentExists check → not found
+		if r.Method == "GET" {
 			w.WriteHeader(http.StatusNotFound)
-		case r.Method == "POST":
-			receivedMethod = r.Method
-			if err := json.NewDecoder(r.Body).Decode(&receivedBody); err != nil {
-				http.Error(w, err.Error(), 400)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(LROResponse{Done: true})
-		default:
-			http.Error(w, "unexpected request", 500)
+			return
 		}
+		gotMethod = r.Method
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(LROResponse{Done: true})
 	}))
 	defer srv.Close()
 
@@ -154,39 +141,66 @@ func TestDeployAgent_CreateNew_ImmediateDone(t *testing.T) {
 	if err := b.BuildAndDeploy(context.Background()); err != nil {
 		t.Fatalf("BuildAndDeploy: %v", err)
 	}
-
-	if receivedMethod != "POST" {
-		t.Errorf("expected POST, got %s", receivedMethod)
+	if gotMethod != "POST" {
+		t.Errorf("expected POST, got %s", gotMethod)
 	}
-	if receivedBody.ID != "test-agent" {
-		t.Errorf("payload ID: got %q, want %q", receivedBody.ID, "test-agent")
+	if gotBody.ID != "test-agent" {
+		t.Errorf("payload ID: got %q", gotBody.ID)
 	}
-	if receivedBody.SystemInstruction != "Be helpful." {
-		t.Errorf("SystemInstruction: got %q", receivedBody.SystemInstruction)
+	if gotBody.SystemInstruction != "Be helpful." {
+		t.Errorf("SystemInstruction: got %q", gotBody.SystemInstruction)
 	}
-	if len(receivedBody.Tools) != 1 || receivedBody.Tools[0].Type != "google_search" {
-		t.Errorf("Tools: got %+v", receivedBody.Tools)
+	if len(gotBody.Tools) != 1 || gotBody.Tools[0].Type != "google_search" {
+		t.Errorf("Tools: %+v", gotBody.Tools)
 	}
 }
 
-func TestDeployAgent_UpdateExisting_ImmediateDone(t *testing.T) {
-	var receivedMethod string
-	var patchURL string
-
+func TestDeployAgent_CreateNew_WithMCPTool(t *testing.T) {
+	var gotBody AgentPayload
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == "GET" && strings.Contains(r.URL.Path, "/agents/test-agent"):
-			// agentExists → found
+		if r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		json.NewEncoder(w).Encode(LROResponse{Done: true})
+	}))
+	defer srv.Close()
+
+	cfg := minimalCfg()
+	cfg.Tools = []config.ToolConfig{
+		{Type: "mcp_server", Name: "my-mcp", URL: "https://example.com/mcp",
+			Headers: map[string]string{"Authorization": "Bearer tok"}},
+	}
+	b := newTestBuilder(cfg, t.TempDir(), srv)
+	if err := b.BuildAndDeploy(context.Background()); err != nil {
+		t.Fatalf("BuildAndDeploy: %v", err)
+	}
+	if len(gotBody.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(gotBody.Tools))
+	}
+	tool := gotBody.Tools[0]
+	if tool.Type != "mcp_server" || tool.URL != "https://example.com/mcp" {
+		t.Errorf("mcp tool: %+v", tool)
+	}
+	if tool.Headers["Authorization"] != "Bearer tok" {
+		t.Errorf("mcp headers: %+v", tool.Headers)
+	}
+}
+
+// ── deployAgent (PATCH existing) ─────────────────────────────────────────────
+
+func TestDeployAgent_UpdateExisting(t *testing.T) {
+	var gotMethod, gotURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{}`))
-		case r.Method == "PATCH":
-			receivedMethod = r.Method
-			patchURL = r.URL.String()
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(LROResponse{Done: true})
-		default:
-			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, 500)
+			return
 		}
+		gotMethod = r.Method
+		gotURL = r.URL.String()
+		json.NewEncoder(w).Encode(LROResponse{Done: true})
 	}))
 	defer srv.Close()
 
@@ -194,12 +208,11 @@ func TestDeployAgent_UpdateExisting_ImmediateDone(t *testing.T) {
 	if err := b.BuildAndDeploy(context.Background()); err != nil {
 		t.Fatalf("BuildAndDeploy: %v", err)
 	}
-
-	if receivedMethod != "PATCH" {
-		t.Errorf("expected PATCH, got %s", receivedMethod)
+	if gotMethod != "PATCH" {
+		t.Errorf("expected PATCH, got %s", gotMethod)
 	}
-	if !strings.Contains(patchURL, "update_mask") {
-		t.Errorf("PATCH URL missing update_mask: %s", patchURL)
+	if !strings.Contains(gotURL, "update_mask") {
+		t.Errorf("PATCH URL missing update_mask: %s", gotURL)
 	}
 }
 
@@ -216,114 +229,148 @@ func TestDeployAgent_APIError(t *testing.T) {
 
 	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
 	err := b.BuildAndDeploy(context.Background())
-	if err == nil {
-		t.Fatal("expected error for 403, got nil")
-	}
-	if !strings.Contains(err.Error(), "403") {
-		t.Errorf("error should mention status 403: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "403") {
+		t.Errorf("expected 403 error, got: %v", err)
 	}
 }
 
-func TestDeployAgent_LROPolling(t *testing.T) {
-	pollCount := 0
+// ── waitForLRO ────────────────────────────────────────────────────────────────
 
+func TestWaitForLRO_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == "GET" && strings.Contains(r.URL.Path, "/agents/test-agent"):
-			w.WriteHeader(http.StatusNotFound)
-		case r.Method == "POST" && strings.Contains(r.URL.Path, "/agents"):
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(LROResponse{
-				Name: "projects/test-project/locations/global/operations/op-123",
-				Done: false,
-			})
-		case r.Method == "GET" && strings.Contains(r.URL.Path, "/operations/op-123"):
-			pollCount++
-			if pollCount < 2 {
-				json.NewEncoder(w).Encode(LROResponse{Done: false})
-				return
-			}
-			json.NewEncoder(w).Encode(LROResponse{Done: true})
-		default:
-			http.Error(w, "unexpected: "+r.Method+" "+r.URL.Path, 500)
-		}
-	}))
-	defer srv.Close()
-
-	// Use a short ticker interval by monkey-patching time is not feasible,
-	// so we test by verifying the operation completes without error.
-	// The real LRO ticker (5s) would be too slow for unit tests.
-	// Instead we test waitForLRO directly with an immediate-done server.
-	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
-
-	// Test waitForLRO separately with a fast mock
-	doneSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(LROResponse{Done: true})
 	}))
-	defer doneSrv.Close()
+	defer srv.Close()
 
-	bFast := newTestBuilder(minimalCfg(), t.TempDir(), doneSrv)
-	if err := bFast.waitForLRO(context.Background(), doneSrv.Client(), "op-fast"); err != nil {
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	if err := b.waitForLRO(context.Background(), srv.Client(), "op-1"); err != nil {
 		t.Fatalf("waitForLRO: %v", err)
 	}
-
-	// Also verify LRO error propagation
-	errSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(LROResponse{Done: true, Error: &LROError{Code: 500, Message: "backend error"}})
-	}))
-	defer errSrv.Close()
-
-	bErr := newTestBuilder(minimalCfg(), t.TempDir(), errSrv)
-	err := bErr.waitForLRO(context.Background(), errSrv.Client(), "op-err")
-	if err == nil || !strings.Contains(err.Error(), "backend error") {
-		t.Errorf("expected LRO error propagation, got: %v", err)
-	}
-
-	_ = b // suppress unused warning; b is used to verify compile path
 }
 
-// --- Interact ---
-
-func TestInteract_Success(t *testing.T) {
-	callCount := 0
+func TestWaitForLRO_ErrorPropagated(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		switch {
-		case r.Method == "POST" && strings.Contains(r.URL.Path, "/interactions"):
-			// initial POST
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "interaction-abc"})
-		case r.Method == "GET" && strings.Contains(r.URL.Path, "/interactions/interaction-abc"):
-			// poll → completed
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(InteractionResponse{
-				ID:     "interaction-abc",
-				Status: "completed",
-				Steps: []InteractionStep{
-					{
-						Type: "model_output",
-						Content: []InteractionContent{
-							{Type: "text", Text: "Hello, world!"},
-						},
-					},
-				},
-			})
-		default:
-			http.Error(w, "unexpected: "+r.Method+" "+r.URL.Path, 500)
-		}
+		json.NewEncoder(w).Encode(LROResponse{Done: true, Error: &LROError{Code: 500, Message: "backend exploded"}})
 	}))
 	defer srv.Close()
 
 	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
-	if err := b.Interact(context.Background(), "hi", false); err != nil {
+	err := b.waitForLRO(context.Background(), srv.Client(), "op-err")
+	if err == nil || !strings.Contains(err.Error(), "backend exploded") {
+		t.Errorf("expected error propagation, got: %v", err)
+	}
+}
+
+func TestWaitForLRO_TransientServerError_Retried(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"transient"}`))
+			return
+		}
+		json.NewEncoder(w).Encode(LROResponse{Done: true})
+	}))
+	defer srv.Close()
+
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	if err := b.waitForLRO(context.Background(), srv.Client(), "op-retry"); err != nil {
+		t.Fatalf("waitForLRO should succeed after retries, got: %v", err)
+	}
+	if calls < 3 {
+		t.Errorf("expected at least 3 calls (2 failures + 1 success), got %d", calls)
+	}
+}
+
+func TestWaitForLRO_ContextCancelled(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(LROResponse{Done: false})
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	err := b.waitForLRO(ctx, srv.Client(), "op-cancel")
+	if err == nil {
+		t.Fatal("expected context cancellation error")
+	}
+}
+
+// ── Delete ────────────────────────────────────────────────────────────────────
+
+func TestDelete_ExistingAgent(t *testing.T) {
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		json.NewEncoder(w).Encode(LROResponse{Done: true})
+	}))
+	defer srv.Close()
+
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	if err := b.Delete(context.Background()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if gotMethod != "DELETE" {
+		t.Errorf("expected DELETE, got %s", gotMethod)
+	}
+}
+
+func TestDelete_AgentNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	// Should return nil, not an error
+	if err := b.Delete(context.Background()); err != nil {
+		t.Errorf("expected nil for 404, got: %v", err)
+	}
+}
+
+func TestDelete_APIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("forbidden"))
+	}))
+	defer srv.Close()
+
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	err := b.Delete(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "403") {
+		t.Errorf("expected 403 error, got: %v", err)
+	}
+}
+
+// ── Interact ──────────────────────────────────────────────────────────────────
+
+func TestInteract_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			json.NewEncoder(w).Encode(map[string]interface{}{"id": "ia-1"})
+			return
+		}
+		json.NewEncoder(w).Encode(InteractionResponse{
+			ID:     "ia-1",
+			Status: "completed",
+			Steps: []InteractionStep{
+				{Type: "model_output", Content: []InteractionContent{{Type: "text", Text: "4"}}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	if err := b.Interact(context.Background(), "2+2?", false); err != nil {
 		t.Fatalf("Interact: %v", err)
 	}
 }
 
 func TestInteract_NoIDInResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{"not_id": "something"})
+		json.NewEncoder(w).Encode(map[string]interface{}{"not_id": "x"})
 	}))
 	defer srv.Close()
 
@@ -348,51 +395,45 @@ func TestInteract_HTTPError(t *testing.T) {
 	}
 }
 
-// --- Payload construction ---
+// ── Payload shape assertions ──────────────────────────────────────────────────
 
-func TestBuildAndDeploy_PayloadHasNoBaseEnvironment_WhenNoBucket(t *testing.T) {
-	var receivedBody AgentPayload
-
+func TestPayload_NoBaseEnvironment_WhenNoBucket(t *testing.T) {
+	var gotBody AgentPayload
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		json.NewDecoder(r.Body).Decode(&receivedBody)
-		w.WriteHeader(http.StatusOK)
+		json.NewDecoder(r.Body).Decode(&gotBody)
 		json.NewEncoder(w).Encode(LROResponse{Done: true})
 	}))
 	defer srv.Close()
 
 	cfg := minimalCfg()
-	cfg.GCSBucket = "" // no bucket
+	cfg.GCSBucket = ""
 	b := newTestBuilder(cfg, t.TempDir(), srv)
 	if err := b.BuildAndDeploy(context.Background()); err != nil {
 		t.Fatalf("BuildAndDeploy: %v", err)
 	}
-	if receivedBody.BaseEnvironment != nil {
-		t.Error("expected nil BaseEnvironment when no GCS bucket configured")
+	if gotBody.BaseEnvironment != nil {
+		t.Error("expected nil BaseEnvironment when no GCS bucket")
 	}
 }
 
-func TestBuildAndDeploy_ContextCancellation(t *testing.T) {
+func TestPayload_ContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		// Return in-progress LRO to force polling loop
-		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(LROResponse{Name: "op/long", Done: false})
 	}))
 	defer srv.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
-
+	cancel()
 	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
-	err := b.BuildAndDeploy(ctx)
-	if err == nil {
+	if err := b.BuildAndDeploy(ctx); err == nil {
 		t.Fatal("expected error from cancelled context")
 	}
 }

@@ -20,7 +20,9 @@ import (
 
 const defaultAPIBase = "https://aiplatform.googleapis.com/v1beta1"
 
-// AgentPayload represents the JSON payload for the CreateAgent API
+// ── API payload types ────────────────────────────────────────────────────────
+
+// AgentPayload is the request body for Create/Update agent.
 type AgentPayload struct {
 	ID                string                  `json:"id,omitempty"`
 	BaseAgent         string                  `json:"base_agent"`
@@ -30,6 +32,8 @@ type AgentPayload struct {
 	BaseEnvironment   *BaseEnvironmentPayload `json:"base_environment,omitempty"`
 }
 
+// ToolPayload maps to a single tool in the API.
+// Valid types: code_execution, filesystem, google_search, mcp_server, url_context.
 type ToolPayload struct {
 	Type    string            `json:"type"`
 	Name    string            `json:"name,omitempty"`
@@ -37,27 +41,32 @@ type ToolPayload struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
+// BaseEnvironmentPayload configures the remote sandbox environment.
 type BaseEnvironmentPayload struct {
-	Type    string                     `json:"type"` // "remote"
+	Type    string                     `json:"type"` // always "remote"
 	Sources []EnvironmentSourcePayload `json:"sources,omitempty"`
 	Network *NetworkConfigPayload      `json:"network,omitempty"`
 }
 
+// EnvironmentSourcePayload mounts a GCS prefix into the sandbox.
 type EnvironmentSourcePayload struct {
 	Type   string `json:"type"` // "gcs"
 	Source string `json:"source"`
 	Target string `json:"target"`
 }
 
+// NetworkConfigPayload controls outbound network from the sandbox.
+// Currently only Domain "*" is supported.
 type NetworkConfigPayload struct {
-	Allowlist []NetworkAllowlistEntryPayload `json:"allowlist,omitempty"`
+	Allowlist []NetworkAllowlistEntry `json:"allowlist,omitempty"`
 }
 
-type NetworkAllowlistEntryPayload struct {
+// NetworkAllowlistEntry is a single domain rule.
+type NetworkAllowlistEntry struct {
 	Domain string `json:"domain"`
 }
 
-// LROResponse represents the response from a long-running operation
+// LROResponse is a long-running operation response.
 type LROResponse struct {
 	Name     string                 `json:"name"`
 	Done     bool                   `json:"done"`
@@ -65,12 +74,13 @@ type LROResponse struct {
 	Response map[string]interface{} `json:"response,omitempty"`
 }
 
+// LROError is the error field inside an LROResponse.
 type LROError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 
-// InteractionPayload represents the payload for the Interact API
+// InteractionPayload is the request body for creating an interaction.
 type InteractionPayload struct {
 	Agent       string             `json:"agent"`
 	Input       []InteractionInput `json:"input"`
@@ -79,21 +89,24 @@ type InteractionPayload struct {
 	Background  bool               `json:"background"`
 }
 
+// InteractionInput is one turn of input.
 type InteractionInput struct {
 	Type    string               `json:"type"` // "user_input"
 	Content []InteractionContent `json:"content"`
 }
 
+// InteractionContent is a single content block.
 type InteractionContent struct {
 	Type string `json:"type"` // "text"
 	Text string `json:"text"`
 }
 
+// InteractionEnv selects the execution environment.
 type InteractionEnv struct {
 	Type string `json:"type"` // "remote"
 }
 
-// InteractionResponse represents the response from the Interact API
+// InteractionResponse is the polled result of an interaction.
 type InteractionResponse struct {
 	ID            string            `json:"id"`
 	Status        string            `json:"status"`
@@ -101,29 +114,32 @@ type InteractionResponse struct {
 	Steps         []InteractionStep `json:"steps"`
 }
 
+// InteractionStep is one step in the agent's execution trace.
 type InteractionStep struct {
-	Type    string               `json:"type"`           // "user_input", "model_output", "function_call", "function_response"
-	Name    string               `json:"name,omitempty"` // for function_call
+	Type    string               `json:"type"`
+	Name    string               `json:"name,omitempty"`
 	Content []InteractionContent `json:"content,omitempty"`
 }
 
-// Builder handles the deployment of the agent
+// ── Builder ──────────────────────────────────────────────────────────────────
+
+// Builder orchestrates deploying and interacting with a Gemini Managed Agent.
 type Builder struct {
-	cfg          *config.AgentConfig
-	dir          string
-	httpClient   *http.Client  // injectable for testing; nil means use google.DefaultClient
-	apiBase      string        // injectable for testing; empty means use defaultAPIBase
-	lroPollInterval time.Duration // injectable for testing; zero means 5s default
-	interactPollInterval time.Duration // injectable for testing; zero means 2s default
+	cfg                  *config.AgentConfig
+	dir                  string
+	httpClient           *http.Client  // nil → use google.DefaultClient (ADC)
+	apiBase              string        // override for tests
+	lroPollInterval      time.Duration // override for tests; default 5s
+	interactPollInterval time.Duration // override for tests; default 2s
 }
 
-// NewBuilder creates a new Builder using Google Application Default Credentials
+// NewBuilder creates a Builder that authenticates via Application Default Credentials.
 func NewBuilder(cfg *config.AgentConfig, dir string) *Builder {
 	return &Builder{cfg: cfg, dir: dir, apiBase: defaultAPIBase}
 }
 
-// newBuilderWithClient creates a Builder with an explicit HTTP client and API base URL.
-// Used in tests to inject an httptest server.
+// newBuilderWithClient creates a Builder with an injected HTTP client and base URL.
+// Intended for tests using httptest.Server.
 func newBuilderWithClient(cfg *config.AgentConfig, dir string, client *http.Client, apiBase string) *Builder {
 	return &Builder{cfg: cfg, dir: dir, httpClient: client, apiBase: apiBase}
 }
@@ -142,34 +158,41 @@ func (b *Builder) getInteractPollInterval() time.Duration {
 	return 2 * time.Second
 }
 
-// getClient returns the HTTP client, creating one from ADC if not already set.
+// getClient returns the HTTP client, initialising from ADC on first call.
 func (b *Builder) getClient(ctx context.Context) (*http.Client, error) {
 	if b.httpClient != nil {
 		return b.httpClient, nil
 	}
 	client, err := google.DefaultClient(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get default client: %v", err)
+		return nil, fmt.Errorf("google.DefaultClient: %w", err)
 	}
 	return client, nil
 }
 
-// BuildAndDeploy reads the agent config directory, uploads assets to GCS if
-// configured, then creates or updates the agent via the Gemini API.
+// agentsURL returns the base URL for the agents collection.
+func (b *Builder) agentsURL() string {
+	return fmt.Sprintf("%s/projects/%s/locations/%s/agents", b.apiBase, b.cfg.ProjectID, b.cfg.Location)
+}
+
+// ── Public operations ────────────────────────────────────────────────────────
+
+// BuildAndDeploy reads the agent directory, uploads assets to GCS if
+// configured, then creates or updates the agent (idempotent).
 func (b *Builder) BuildAndDeploy(ctx context.Context) error {
 	instructions, err := b.readInstructions()
 	if err != nil {
-		return fmt.Errorf("failed to read instructions: %v", err)
+		return fmt.Errorf("reading instructions: %w", err)
 	}
 
 	var sources []EnvironmentSourcePayload
 	if b.cfg.GCSBucket != "" {
 		if err := b.ensureBucketExists(ctx); err != nil {
-			return fmt.Errorf("failed to ensure GCS bucket exists: %v", err)
+			return fmt.Errorf("ensuring GCS bucket: %w", err)
 		}
 		fmt.Printf("Uploading files to gs://%s/%s/ ...\n", b.cfg.GCSBucket, b.cfg.ID)
 		if err := b.uploadToGCS(ctx); err != nil {
-			return fmt.Errorf("failed to upload to GCS: %v", err)
+			return fmt.Errorf("uploading to GCS: %w", err)
 		}
 		sources = append(sources, EnvironmentSourcePayload{
 			Type:   "gcs",
@@ -193,137 +216,29 @@ func (b *Builder) BuildAndDeploy(ctx context.Context) error {
 		})
 	}
 	if len(sources) > 0 {
+		allowlist := b.buildAllowlist()
 		payload.BaseEnvironment = &BaseEnvironmentPayload{
 			Type:    "remote",
 			Sources: sources,
-			Network: &NetworkConfigPayload{
-				Allowlist: []NetworkAllowlistEntryPayload{{Domain: "*"}},
-			},
+			Network: &NetworkConfigPayload{Allowlist: allowlist},
 		}
 	}
 
 	return b.deployAgent(ctx, payload)
 }
 
-func (b *Builder) readInstructions() (string, error) {
-	filename := filepath.Join(b.dir, "instructions.md")
-	data, err := os.ReadFile(filename)
-	if os.IsNotExist(err) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-func (b *Builder) ensureBucketExists(ctx context.Context) error {
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-
-	bucket := client.Bucket(b.cfg.GCSBucket)
-	_, err = bucket.Attrs(ctx)
-	if errors.Is(err, storage.ErrBucketNotExist) {
-		location := b.cfg.Location
-		if location == "global" || location == "" {
-			location = "us-central1"
-		}
-		fmt.Printf("Bucket %s does not exist. Creating it in %s...\n", b.cfg.GCSBucket, location)
-		if err = bucket.Create(ctx, b.cfg.ProjectID, &storage.BucketAttrs{Location: location}); err != nil {
-			return fmt.Errorf("failed to create bucket %s: %v", b.cfg.GCSBucket, err)
-		}
-		fmt.Printf("Bucket %s created successfully.\n", b.cfg.GCSBucket)
-		return nil
-	}
-	return err
-}
-
-func (b *Builder) uploadToGCS(ctx context.Context) error {
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-
-	bucket := client.Bucket(b.cfg.GCSBucket)
-
-	return filepath.Walk(b.dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-
-		relPath, err := filepath.Rel(b.dir, path)
-		if err != nil {
-			return err
-		}
-
-		// Skip agent.yaml (deployment config); upload everything else
-		// including instructions.md and skills/ so the agent runtime can read them.
-		if relPath == "agent.yaml" {
-			return nil
-		}
-		// Skip hidden files/dirs (e.g. .git)
-		if strings.HasPrefix(relPath, ".") {
-			return nil
-		}
-
-		fmt.Printf("  Uploading %s ...\n", relPath)
-
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
-		objName := filepath.Join(b.cfg.ID, relPath)
-		wc := bucket.Object(objName).NewWriter(ctx)
-		if _, err = io.Copy(wc, f); err != nil {
-			return err
-		}
-		return wc.Close()
-	})
-}
-
-func (b *Builder) deployAgent(ctx context.Context, payload AgentPayload) error {
+// Delete removes the agent. Returns nil if the agent does not exist.
+func (b *Builder) Delete(ctx context.Context) error {
 	client, err := b.getClient(ctx)
 	if err != nil {
 		return err
 	}
 
-	agentsURL := fmt.Sprintf("%s/projects/%s/locations/%s/agents", b.apiBase, b.cfg.ProjectID, b.cfg.Location)
-
-	exists, err := b.agentExists(ctx, client)
-	if err != nil {
-		return fmt.Errorf("failed to check if agent exists: %v", err)
-	}
-
-	var reqURL, method string
-	if exists {
-		method = "PATCH"
-		reqURL = fmt.Sprintf("%s/%s?update_mask=description,system_instruction,tools,base_environment", agentsURL, b.cfg.ID)
-		payload.ID = "" // Omit ID from body for PATCH
-	} else {
-		method = "POST"
-		reqURL = agentsURL
-	}
-
-	payloadBytes, err := json.Marshal(payload)
+	url := fmt.Sprintf("%s/%s", b.agentsURL(), b.cfg.ID)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("%s Agent %s ...\n", method, b.cfg.ID)
-	req, err := http.NewRequestWithContext(ctx, method, reqURL, bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -331,113 +246,44 @@ func (b *Builder) deployAgent(ctx context.Context, payload AgentPayload) error {
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("API call failed (%d): %s", resp.StatusCode, string(respBody))
-	}
-
-	var lro LROResponse
-	if err = json.Unmarshal(respBody, &lro); err != nil {
-		return fmt.Errorf("failed to parse LRO response: %v", err)
-	}
-
-	if lro.Done {
-		if lro.Error != nil {
-			return fmt.Errorf("operation failed: %s", lro.Error.Message)
-		}
-		fmt.Println("Agent deployed immediately.")
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Printf("Agent %s does not exist, nothing to delete.\n", b.cfg.ID)
 		return nil
 	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("delete failed (%d): %s", resp.StatusCode, string(body))
+	}
 
-	fmt.Printf("Waiting for operation %s to complete...\n", lro.Name)
+	// DELETE returns an LRO
+	var lro LROResponse
+	if err = json.Unmarshal(body, &lro); err != nil {
+		// Some responses may be empty on success
+		fmt.Printf("Agent %s deletion initiated.\n", b.cfg.ID)
+		return nil
+	}
+	if lro.Done {
+		fmt.Printf("Agent %s deleted.\n", b.cfg.ID)
+		return nil
+	}
+	fmt.Printf("Waiting for deletion of %s...\n", b.cfg.ID)
 	return b.waitForLRO(ctx, client, lro.Name)
 }
 
-func (b *Builder) agentExists(ctx context.Context, client *http.Client) (bool, error) {
-	url := fmt.Sprintf("%s/projects/%s/locations/%s/agents/%s", b.apiBase, b.cfg.ProjectID, b.cfg.Location, b.cfg.ID)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return false, err
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return false, nil
-	}
-	if resp.StatusCode == http.StatusOK {
-		return true, nil
-	}
-	respBody, _ := io.ReadAll(resp.Body)
-	return false, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(respBody))
-}
-
-func (b *Builder) waitForLRO(ctx context.Context, client *http.Client, opName string) error {
-	url := fmt.Sprintf("%s/%s", b.apiBase, opName)
-
-	ticker := time.NewTicker(b.getLROPollInterval())
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-			if err != nil {
-				return err
-			}
-
-			resp, err := client.Do(req)
-			if err != nil {
-				return err
-			}
-
-			respBody, _ := io.ReadAll(resp.Body)
-			resp.Body.Close() // explicit close in loop; not deferred
-
-			if resp.StatusCode >= 400 {
-				return fmt.Errorf("failed to get operation status (%d): %s", resp.StatusCode, string(respBody))
-			}
-
-			var lro LROResponse
-			if err = json.Unmarshal(respBody, &lro); err != nil {
-				return err
-			}
-
-			if lro.Done {
-				if lro.Error != nil {
-					return fmt.Errorf("operation failed: %s", lro.Error.Message)
-				}
-				fmt.Println("Agent deployed successfully.")
-				return nil
-			}
-			fmt.Print(".")
-		}
-	}
-}
-
-// Interact sends a prompt to the deployed agent and polls for the response.
+// Interact sends prompt to the deployed agent and prints the response.
 func (b *Builder) Interact(ctx context.Context, prompt string, verbose bool) error {
 	client, err := b.getClient(ctx)
 	if err != nil {
 		return err
 	}
 
-	agentResourceName := fmt.Sprintf("projects/%s/locations/%s/agents/%s", b.cfg.ProjectID, b.cfg.Location, b.cfg.ID)
-
+	agentRef := fmt.Sprintf("projects/%s/locations/%s/agents/%s", b.cfg.ProjectID, b.cfg.Location, b.cfg.ID)
 	payload := InteractionPayload{
-		Agent: agentResourceName,
+		Agent: agentRef,
 		Input: []InteractionInput{
 			{
-				Type: "user_input",
-				Content: []InteractionContent{
-					{Type: "text", Text: prompt},
-				},
+				Type:    "user_input",
+				Content: []InteractionContent{{Type: "text", Text: prompt}},
 			},
 		},
 		Stream:      false,
@@ -471,17 +317,17 @@ func (b *Builder) Interact(ctx context.Context, prompt string, verbose bool) err
 		return fmt.Errorf("interaction failed (%d): %s", resp.StatusCode, string(respBody))
 	}
 
-	var initialResponse map[string]interface{}
-	if err = json.Unmarshal(respBody, &initialResponse); err != nil {
-		return fmt.Errorf("failed to parse initial response: %v", err)
+	var initial map[string]interface{}
+	if err = json.Unmarshal(respBody, &initial); err != nil {
+		return fmt.Errorf("parsing initial response: %w", err)
 	}
 
-	interactionID, ok := initialResponse["id"].(string)
+	interactionID, ok := initial["id"].(string)
 	if !ok {
 		return fmt.Errorf("response did not contain interaction ID: %s", string(respBody))
 	}
 
-	fmt.Printf("Interaction created with ID: %s. Polling for results...\n", interactionID)
+	fmt.Printf("Interaction %s created. Polling...\n", interactionID)
 
 	pollURL := fmt.Sprintf("%s/%s", interactURL, interactionID)
 	ticker := time.NewTicker(b.getInteractPollInterval())
@@ -502,9 +348,8 @@ func (b *Builder) Interact(ctx context.Context, prompt string, verbose bool) err
 			if err != nil {
 				return err
 			}
-
 			pollBody, _ := io.ReadAll(pollResp.Body)
-			pollResp.Body.Close() // explicit close in loop; not deferred
+			pollResp.Body.Close()
 
 			if pollResp.StatusCode >= 400 {
 				return fmt.Errorf("polling failed (%d): %s", pollResp.StatusCode, string(pollBody))
@@ -512,36 +357,252 @@ func (b *Builder) Interact(ctx context.Context, prompt string, verbose bool) err
 
 			var result map[string]interface{}
 			if err = json.Unmarshal(pollBody, &result); err != nil {
-				return fmt.Errorf("failed to parse poll response: %v", err)
+				return fmt.Errorf("parsing poll response: %w", err)
 			}
 
 			status, _ := result["status"].(string)
-			fmt.Printf("Status: %s\n", status)
+			if status == "in_progress" {
+				fmt.Print(".")
+				continue
+			}
 
-			if status != "in_progress" {
-				if verbose {
-					fmt.Println("Final Response (Raw):")
-					prettyJSON, _ := json.MarshalIndent(result, "", "  ")
-					fmt.Println(string(prettyJSON))
-				} else {
-					var response InteractionResponse
-					if err = json.Unmarshal(pollBody, &response); err != nil {
-						return fmt.Errorf("failed to parse final response: %v", err)
-					}
-					fmt.Println("Agent Response:")
-					for _, step := range response.Steps {
-						if step.Type == "model_output" {
-							for _, content := range step.Content {
-								if content.Type == "text" {
-									fmt.Print(content.Text)
-								}
+			fmt.Println()
+			if verbose {
+				prettyJSON, _ := json.MarshalIndent(result, "", "  ")
+				fmt.Println(string(prettyJSON))
+			} else {
+				var response InteractionResponse
+				if err = json.Unmarshal(pollBody, &response); err != nil {
+					return fmt.Errorf("parsing final response: %w", err)
+				}
+				fmt.Println("\nAgent Response:")
+				for _, step := range response.Steps {
+					if step.Type == "model_output" {
+						for _, content := range step.Content {
+							if content.Type == "text" {
+								fmt.Print(content.Text)
 							}
 						}
 					}
-					fmt.Println()
 				}
+				fmt.Println()
+			}
+			return nil
+		}
+	}
+}
+
+// ── Internal helpers ─────────────────────────────────────────────────────────
+
+func (b *Builder) buildAllowlist() []NetworkAllowlistEntry {
+	if len(b.cfg.Network.Allowlist) == 0 {
+		return []NetworkAllowlistEntry{{Domain: "*"}}
+	}
+	out := make([]NetworkAllowlistEntry, len(b.cfg.Network.Allowlist))
+	for i, d := range b.cfg.Network.Allowlist {
+		out[i] = NetworkAllowlistEntry{Domain: d}
+	}
+	return out
+}
+
+func (b *Builder) readInstructions() (string, error) {
+	data, err := os.ReadFile(filepath.Join(b.dir, "instructions.md"))
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	return string(data), err
+}
+
+func (b *Builder) ensureBucketExists(ctx context.Context) error {
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	bucket := client.Bucket(b.cfg.GCSBucket)
+	if _, err = bucket.Attrs(ctx); errors.Is(err, storage.ErrBucketNotExist) {
+		location := b.cfg.Location
+		if location == "global" || location == "" {
+			location = "us-central1"
+		}
+		fmt.Printf("Creating GCS bucket %s in %s...\n", b.cfg.GCSBucket, location)
+		if err = bucket.Create(ctx, b.cfg.ProjectID, &storage.BucketAttrs{Location: location}); err != nil {
+			return fmt.Errorf("creating bucket %s: %w", b.cfg.GCSBucket, err)
+		}
+		fmt.Printf("Bucket %s created.\n", b.cfg.GCSBucket)
+		return nil
+	}
+	return err
+}
+
+func (b *Builder) uploadToGCS(ctx context.Context) error {
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	bucket := client.Bucket(b.cfg.GCSBucket)
+
+	return filepath.Walk(b.dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		relPath, err := filepath.Rel(b.dir, path)
+		if err != nil {
+			return err
+		}
+		// Skip deployment config itself and hidden files
+		if relPath == "agent.yaml" || strings.HasPrefix(relPath, ".") {
+			return nil
+		}
+		fmt.Printf("  Uploading %s ...\n", relPath)
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		wc := bucket.Object(filepath.Join(b.cfg.ID, relPath)).NewWriter(ctx)
+		if _, err = io.Copy(wc, f); err != nil {
+			return err
+		}
+		return wc.Close()
+	})
+}
+
+func (b *Builder) deployAgent(ctx context.Context, payload AgentPayload) error {
+	client, err := b.getClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	exists, err := b.agentExists(ctx, client)
+	if err != nil {
+		return fmt.Errorf("checking agent existence: %w", err)
+	}
+
+	var reqURL, method string
+	if exists {
+		method = "PATCH"
+		// Build update_mask dynamically. Only include base_environment when
+		// it is actually set — the API rejects a null value for that field.
+		mask := "description,system_instruction,tools"
+		if payload.BaseEnvironment != nil {
+			mask += ",base_environment"
+		}
+		reqURL = fmt.Sprintf("%s/%s?update_mask=%s", b.agentsURL(), b.cfg.ID, mask)
+		payload.ID = ""
+	} else {
+		method = "POST"
+		reqURL = b.agentsURL()
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%s agent %s...\n", method, b.cfg.ID)
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("API call failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var lro LROResponse
+	if err = json.Unmarshal(respBody, &lro); err != nil {
+		return fmt.Errorf("parsing LRO response: %w", err)
+	}
+	if lro.Done {
+		if lro.Error != nil {
+			return fmt.Errorf("operation failed: %s", lro.Error.Message)
+		}
+		fmt.Println("Agent deployed.")
+		return nil
+	}
+
+	fmt.Printf("Operation %s in progress...\n", lro.Name)
+	return b.waitForLRO(ctx, client, lro.Name)
+}
+
+func (b *Builder) agentExists(ctx context.Context, client *http.Client) (bool, error) {
+	url := fmt.Sprintf("%s/%s", b.agentsURL(), b.cfg.ID)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		body, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+}
+
+func (b *Builder) waitForLRO(ctx context.Context, client *http.Client, opName string) error {
+	url := fmt.Sprintf("%s/%s", b.apiBase, opName)
+	ticker := time.NewTicker(b.getLROPollInterval())
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+			if err != nil {
+				return err
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				return err
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			// Retry on transient server errors (5xx) — the API occasionally
+			// returns DEADLINE_EXCEEDED from internal dependencies during LRO poll.
+			if resp.StatusCode >= 500 {
+				fmt.Print("!")
+				continue
+			}
+			if resp.StatusCode >= 400 {
+				return fmt.Errorf("LRO poll failed (%d): %s", resp.StatusCode, string(body))
+			}
+
+			var lro LROResponse
+			if err = json.Unmarshal(body, &lro); err != nil {
+				return fmt.Errorf("parsing LRO: %w", err)
+			}
+			if lro.Done {
+				if lro.Error != nil {
+					return fmt.Errorf("operation failed: %s", lro.Error.Message)
+				}
+				fmt.Println("Done.")
 				return nil
 			}
+			fmt.Print(".")
 		}
 	}
 }

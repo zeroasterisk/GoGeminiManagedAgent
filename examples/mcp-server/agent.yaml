@@ -1,0 +1,23 @@
+id: "mcp-agent"
+description: "Uses an MCP server for durable integrations (Drive, BigQuery, etc.)."
+project_id: "alanblount-sandbox"
+gcs_bucket: "alanblount-sandbox-geap-testing"
+
+# mcp_server connects the agent to any Model Context Protocol endpoint.
+# This is how you wire durable integrations:
+#   - Google Drive / Docs / Sheets  → use a Drive MCP server
+#   - BigQuery                       → use a BigQuery MCP server
+#   - GitHub, Jira, Slack, etc.     → use their respective MCP servers
+#
+# The sandbox environment is ephemeral (torn down after each interaction),
+# but data you read/write through the MCP server persists in the external system.
+#
+# Replace the url below with your actual MCP server endpoint.
+# The Authorization header is the auth token your MCP server expects.
+tools:
+  - type: "mcp_server"
+    name: "my-data-server"
+    url: "https://your-mcp-server.example.com/mcp"
+    headers:
+      Authorization: "Bearer YOUR_MCP_TOKEN"
+  - type: "code_execution"

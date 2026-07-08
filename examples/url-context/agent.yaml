@@ -1,0 +1,9 @@
+id: "url-context-agent"
+description: "Reads live URLs and summarises their content."
+project_id: "alanblount-sandbox"
+
+# url_context lets the agent fetch and reason over the content of URLs
+# mentioned in the conversation — no browsing tool required.
+tools:
+  - type: "url_context"
+  - type: "google_search"
