@@ -175,7 +175,70 @@ func (b *Builder) agentsURL() string {
 	return fmt.Sprintf("%s/projects/%s/locations/%s/agents", b.apiBase, b.cfg.ProjectID, b.cfg.Location)
 }
 
+// ── List response types ───────────────────────────────────────────────────────
+
+// AgentSummary is a single entry from the List agents response.
+type AgentSummary struct {
+	ID          string        `json:"id"`
+	Description string        `json:"description"`
+	BaseAgent   string        `json:"base_agent"`
+	Created     string        `json:"created"`
+	Updated     string        `json:"updated"`
+	Tools       []ToolPayload `json:"tools"`
+}
+
+type listAgentsResponse struct {
+	Agents        []AgentSummary `json:"agents"`
+	NextPageToken string         `json:"nextPageToken"`
+}
+
 // ── Public operations ────────────────────────────────────────────────────────
+
+// List returns all agents in the project, following pagination automatically.
+func (b *Builder) List(ctx context.Context) ([]AgentSummary, error) {
+	client, err := b.getClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var all []AgentSummary
+	pageToken := ""
+
+	for {
+		url := b.agentsURL()
+		if pageToken != "" {
+			url += "?pageToken=" + pageToken
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			return nil, fmt.Errorf("list failed (%d): %s", resp.StatusCode, string(body))
+		}
+
+		var page listAgentsResponse
+		if err = json.Unmarshal(body, &page); err != nil {
+			return nil, fmt.Errorf("parsing list response: %w", err)
+		}
+		all = append(all, page.Agents...)
+
+		if page.NextPageToken == "" {
+			break
+		}
+		pageToken = page.NextPageToken
+	}
+
+	return all, nil
+}
 
 // BuildAndDeploy reads the agent directory, uploads assets to GCS if
 // configured, then creates or updates the agent (idempotent).
@@ -517,6 +580,30 @@ func (b *Builder) deployAgent(ctx context.Context, payload AgentPayload) error {
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+
+	// 409 ALREADY_EXISTS: a concurrent deploy won the race on POST.
+	// Re-run as PATCH so the caller's intent (create-or-update) is honoured.
+	if resp.StatusCode == http.StatusConflict && method == "POST" {
+		fmt.Printf("Agent %s already exists (race); switching to PATCH...\n", b.cfg.ID)
+		payload.ID = ""
+		patchURL := fmt.Sprintf("%s/%s?update_mask=description,system_instruction,tools,base_environment", b.agentsURL(), b.cfg.ID)
+		if payload.BaseEnvironment == nil {
+			patchURL = fmt.Sprintf("%s/%s?update_mask=description,system_instruction,tools", b.agentsURL(), b.cfg.ID)
+		}
+		payloadBytes, _ = json.Marshal(payload)
+		req, err = http.NewRequestWithContext(ctx, "PATCH", patchURL, bytes.NewBuffer(payloadBytes))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err = client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		respBody, _ = io.ReadAll(resp.Body)
+	}
+
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("API call failed (%d): %s", resp.StatusCode, string(respBody))
 	}

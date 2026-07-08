@@ -97,7 +97,7 @@ func TestValidate_MissingID(t *testing.T) {
 func TestValidate_BadLocation(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "agent.yaml", `
-id: "x"
+id: "my-agent"
 location: "us-east5"
 `)
 	_, err := ReadConfig(dir)
@@ -109,7 +109,7 @@ location: "us-east5"
 func TestValidate_UnsupportedToolType(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "agent.yaml", `
-id: "x"
+id: "my-agent"
 tools:
   - type: "http"
 `)
@@ -122,7 +122,7 @@ tools:
 func TestValidate_MCPServerMissingURL(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "agent.yaml", `
-id: "x"
+id: "my-agent"
 tools:
   - type: "mcp_server"
     name: "no-url"
@@ -136,7 +136,7 @@ tools:
 func TestValidate_NetworkAllowlistOnlyStarSupported(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "agent.yaml", `
-id: "x"
+id: "my-agent"
 network:
   allowlist:
     - "*.googleapis.com"
@@ -150,7 +150,7 @@ network:
 func TestValidate_NetworkAllowlistStar(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "agent.yaml", `
-id: "x"
+id: "my-agent"
 network:
   allowlist:
     - "*"
@@ -161,10 +161,85 @@ network:
 	}
 }
 
+// ── ID format validation ──────────────────────────────────────────────────────
+
+func TestValidate_IDTooShort(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `id: "ab"`) // 2 chars, min is 3
+	_, err := ReadConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected invalid ID error, got: %v", err)
+	}
+}
+
+func TestValidate_IDWithUppercase(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `id: "MyAgent"`)
+	_, err := ReadConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected invalid ID error, got: %v", err)
+	}
+}
+
+func TestValidate_IDWithSpaces(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `id: "my agent"`)
+	_, err := ReadConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected invalid ID error, got: %v", err)
+	}
+}
+
+func TestValidate_IDTrailingHyphen(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `id: "my-agent-"`)
+	_, err := ReadConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected invalid ID error for trailing hyphen, got: %v", err)
+	}
+}
+
+func TestValidate_IDLeadingDigit(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `id: "1agent"`)
+	_, err := ReadConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected invalid ID error for leading digit, got: %v", err)
+	}
+}
+
+func TestValidate_IDTooLong(t *testing.T) {
+	dir := t.TempDir()
+	// 64 chars — one over the limit
+	writeFile(t, dir, "agent.yaml", `id: "a123456789012345678901234567890123456789012345678901234567890123"`)
+	_, err := ReadConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected invalid ID error for too-long ID, got: %v", err)
+	}
+}
+
+func TestValidate_IDValid_MinLength(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `id: "abc"`) // 3 chars — minimum valid
+	_, err := ReadConfig(dir)
+	if err != nil {
+		t.Errorf("expected valid 3-char ID to pass, got: %v", err)
+	}
+}
+
+func TestValidate_IDValid_WithHyphens(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `id: "my-great-agent-v2"`)
+	_, err := ReadConfig(dir)
+	if err != nil {
+		t.Errorf("expected valid hyphenated ID to pass, got: %v", err)
+	}
+}
+
 func TestReadConfig_LocationExplicitGlobal(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "agent.yaml", `
-id: "x"
+id: "my-agent"
 location: "global"
 `)
 	cfg, err := ReadConfig(dir)

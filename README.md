@@ -249,12 +249,50 @@ Commands:
   deploy   Create or update the agent (default when no command given)
   verify   Send a test prompt and print the response
   delete   Remove the agent
+  list     List all agents in the project
 
 Flags:
   -dir string     Agent config directory (default ".")
   -prompt string  Prompt for the verify command (default "Hello")
   -verbose        Print raw JSON response (verify only)
 ```
+
+### List deployed agents
+
+`list` is project-scoped — it doesn't need a `-dir`.
+
+```bash
+GEMINI_PROJECT_ID=my-gcp-project geap-managed-agents-builder list
+```
+
+Output:
+
+```
+ID               DESCRIPTION                        TOOLS                          UPDATED
+--               -----------                        -----                          -------
+minimal-agent    Search the web and run Python.     google_search, code_execution  2026-07-08
+research-agent   Research and data assistant.       url_context, mcp_server        2026-07-08
+
+2 agent(s) in project "my-gcp-project" (location: global)
+```
+
+---
+
+## Edge cases and error handling
+
+| Situation | What happens |
+|---|---|
+| **`deploy` on an existing agent** | Detects via GET first, issues PATCH instead of POST. Idempotent. |
+| **Concurrent deploy race (two processes, same agent ID)** | First POST wins; the second gets 409 ALREADY_EXISTS and automatically retries as PATCH. |
+| **Invalid agent ID** (uppercase, spaces, trailing hyphen, leading digit, < 3 or > 63 chars) | Caught by local validation before any API call. Error message quotes the constraint. |
+| **Wrong location** (anything other than `"global"`) | Caught by local validation. The API only accepts `global`; attempting another value returns 400. |
+| **Unsupported tool type** (e.g. `http`, `drive`, `bigquery`) | Caught by local validation with a list of supported types. |
+| **`mcp_server` tool missing `url`** | Caught by local validation before deploy. |
+| **GCS bucket doesn't exist** | Auto-created in `us-central1` (or the resolved location) before upload. |
+| **Transient API 5xx during LRO poll** | Retried automatically; printed as `!` in progress output. |
+| **`delete` on a non-existent agent** | Returns cleanly with "nothing to delete" — no error. |
+| **No `instructions.md`** | Allowed. Agent is deployed with an empty system prompt. |
+| **Context cancellation / timeout** | Propagated immediately from any in-flight operation. |
 
 ---
 

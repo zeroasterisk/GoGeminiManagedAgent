@@ -4,9 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 )
+
+// idPattern mirrors the API's ID constraint:
+// lowercase letters, digits, hyphens; must start with a letter;
+// must end with a letter or digit; 3–63 characters.
+var idPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,61}[a-z0-9]$`)
 
 // validToolTypes is the exhaustive set accepted by the Gemini Managed Agent API.
 // Reference: confirmed against API error messages on 2026-07-08.
@@ -85,6 +91,9 @@ func ReadConfig(dir string) (*AgentConfig, error) {
 func (c *AgentConfig) Validate() error {
 	if c.ID == "" {
 		return fmt.Errorf("agent.yaml: id is required")
+	}
+	if !idPattern.MatchString(c.ID) {
+		return fmt.Errorf("agent.yaml: id %q is invalid — must be 3–63 characters, lowercase letters/digits/hyphens, start with a letter, end with a letter or digit", c.ID)
 	}
 	if c.Location != "global" {
 		return fmt.Errorf("agent.yaml: location must be \"global\" (only location supported by the API); got %q", c.Location)

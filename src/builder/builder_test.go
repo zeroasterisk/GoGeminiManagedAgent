@@ -395,6 +395,130 @@ func TestInteract_HTTPError(t *testing.T) {
 	}
 }
 
+// ── List ──────────────────────────────────────────────────────────────────────
+
+func TestList_Empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{"agents": []interface{}{}})
+	}))
+	defer srv.Close()
+
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	agents, err := b.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(agents) != 0 {
+		t.Errorf("expected 0 agents, got %d", len(agents))
+	}
+}
+
+func TestList_SinglePage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(listAgentsResponse{
+			Agents: []AgentSummary{
+				{ID: "agent-one", Description: "first"},
+				{ID: "agent-two", Description: "second"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	agents, err := b.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(agents) != 2 {
+		t.Fatalf("expected 2 agents, got %d", len(agents))
+	}
+	if agents[0].ID != "agent-one" || agents[1].ID != "agent-two" {
+		t.Errorf("unexpected agent IDs: %v", agents)
+	}
+}
+
+func TestList_Pagination(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Query().Get("pageToken") == "" {
+			json.NewEncoder(w).Encode(listAgentsResponse{
+				Agents:        []AgentSummary{{ID: "agent-page1"}},
+				NextPageToken: "tok-abc",
+			})
+		} else {
+			json.NewEncoder(w).Encode(listAgentsResponse{
+				Agents: []AgentSummary{{ID: "agent-page2"}},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	agents, err := b.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(agents) != 2 {
+		t.Fatalf("expected 2 agents across 2 pages, got %d", len(agents))
+	}
+	if calls != 2 {
+		t.Errorf("expected 2 HTTP calls for pagination, got %d", calls)
+	}
+	if agents[0].ID != "agent-page1" || agents[1].ID != "agent-page2" {
+		t.Errorf("unexpected IDs: %v", agents)
+	}
+}
+
+func TestList_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("forbidden"))
+	}))
+	defer srv.Close()
+
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	_, err := b.List(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "403") {
+		t.Errorf("expected 403 error, got: %v", err)
+	}
+}
+
+// ── 409 race condition handling ───────────────────────────────────────────────
+
+func TestDeployAgent_409Race_FallsBackToPatch(t *testing.T) {
+	var methods []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		switch r.Method {
+		case "GET":
+			// agentExists returns 404 — "not found"
+			w.WriteHeader(http.StatusNotFound)
+		case "POST":
+			// Race: someone else created it between our GET and POST
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(`{"error":{"code":409,"message":"Agent already exists"}}`))
+		case "PATCH":
+			// Fallback PATCH succeeds
+			json.NewEncoder(w).Encode(LROResponse{Done: true})
+		default:
+			http.Error(w, "unexpected", 500)
+		}
+	}))
+	defer srv.Close()
+
+	b := newTestBuilder(minimalCfg(), t.TempDir(), srv)
+	if err := b.BuildAndDeploy(context.Background()); err != nil {
+		t.Fatalf("BuildAndDeploy should recover from 409: %v", err)
+	}
+	if len(methods) < 3 {
+		t.Errorf("expected GET + POST + PATCH, got: %v", methods)
+	}
+	if methods[len(methods)-1] != "PATCH" {
+		t.Errorf("last call should be PATCH, got: %v", methods)
+	}
+}
+
 // ── Payload shape assertions ──────────────────────────────────────────────────
 
 func TestPayload_NoBaseEnvironment_WhenNoBucket(t *testing.T) {
