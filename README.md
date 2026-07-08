@@ -216,6 +216,46 @@ to call it from an application.
 projects/{PROJECT_ID}/locations/global/agents/{AGENT_ID}
 ```
 
+### Official SDK (Python / TypeScript)
+
+The official `google-genai >= 2.0.0` SDK has first-class support for the interactions API:
+
+```bash
+pip install "google-genai>=2.0.0"
+```
+
+```python
+import os
+from google import genai
+
+os.environ["GOOGLE_GENAI_USE_ENTERPRISE"] = "true"
+os.environ["GOOGLE_CLOUD_PROJECT"] = "my-gcp-project"
+os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
+
+client = genai.Client()
+
+AGENT = "projects/my-gcp-project/locations/global/agents/my-agent"
+
+# Single turn
+turn1 = client.interactions.create(
+    agent=AGENT,
+    input="My name is Alan. What is 12 factorial?",
+    store=True,          # persist this turn for multi-turn follow-up
+)
+print(turn1.steps[-1].content[0].text)
+
+# Multi-turn: continue from the previous interaction
+turn2 = client.interactions.create(
+    agent=AGENT,
+    input="What was my name again?",
+    previous_interaction_id=turn1.id,
+)
+print(turn2.steps[-1].content[0].text)  # "Your name is Alan."
+```
+
+> The legacy SDKs (`google-cloud-aiplatform`, `google-generativeai`) do **not** support
+> the interactions API. Use `google-genai >= 2.0.0`.
+
 ### Auth
 
 Your application needs a Google credential with the `cloud-platform` OAuth scope.
@@ -224,16 +264,16 @@ Your application needs a Google credential with the `cloud-platform` OAuth scope
 # Local development
 gcloud auth application-default login
 
-# Production (recommended)
-# Create a service account, grant it roles/aiplatform.user,
-# and use Workload Identity or a key file.
+# Production (recommended): service account with roles/aiplatform.user
 gcloud iam service-accounts create my-agent-caller
 gcloud projects add-iam-policy-binding PROJECT_ID \
   --member="serviceAccount:my-agent-caller@PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/aiplatform.user"
 ```
 
-### Calling the interactions API (Go example)
+### Calling the interactions API directly (Go / any language)
+
+For Go or any language without an official SDK, use the REST API directly:
 
 ```go
 package main
@@ -256,24 +296,25 @@ const (
     apiBase   = "https://aiplatform.googleapis.com/v1beta1"
 )
 
-func callAgent(ctx context.Context, prompt string) error {
-    client, err := google.DefaultClient(ctx, "https://www.googleapis.com/auth/cloud-platform")
-    if err != nil {
-        return err
-    }
-
-    // 1. Create an interaction (background=true → async)
-    body, _ := json.Marshal(map[string]any{
+// sendTurn sends one turn and returns the interaction ID and the agent's reply.
+// Pass prevID="" for the first turn; pass the previous turn's ID for follow-ups.
+func sendTurn(ctx context.Context, client *http.Client, prompt, prevID string) (id, reply string, err error) {
+    payload := map[string]any{
         "agent": fmt.Sprintf("projects/%s/locations/global/agents/%s", projectID, agentID),
         "input": []map[string]any{{
             "type":    "user_input",
             "content": []map[string]any{{"type": "text", "text": prompt}},
         }},
+        "store":       true,        // persist for multi-turn follow-up
+        "background":  true,        // required for managed agents
         "stream":      false,
-        "background":  true,
         "environment": map[string]any{"type": "remote"},
-    })
+    }
+    if prevID != "" {
+        payload["previous_interaction_id"] = prevID
+    }
 
+    body, _ := json.Marshal(payload)
     interactURL := fmt.Sprintf("%s/projects/%s/locations/global/interactions", apiBase, projectID)
     req, _ := http.NewRequestWithContext(ctx, "POST", interactURL, bytes.NewBuffer(body))
     req.Header.Set("Content-Type", "application/json")
@@ -281,16 +322,16 @@ func callAgent(ctx context.Context, prompt string) error {
 
     resp, err := client.Do(req)
     if err != nil {
-        return err
+        return "", "", err
     }
     defer resp.Body.Close()
     raw, _ := io.ReadAll(resp.Body)
 
     var initial map[string]any
     json.Unmarshal(raw, &initial)
-    id := initial["id"].(string)
+    id = initial["id"].(string)
 
-    // 2. Poll until complete
+    // Poll until complete
     pollURL := fmt.Sprintf("%s/%s", interactURL, id)
     for {
         time.Sleep(2 * time.Second)
@@ -305,19 +346,29 @@ func callAgent(ctx context.Context, prompt string) error {
         if result["status"] == "in_progress" {
             continue
         }
-
-        // 3. Extract model output from steps
         for _, step := range result["steps"].([]any) {
             s := step.(map[string]any)
             if s["type"] == "model_output" {
                 for _, c := range s["content"].([]any) {
-                    fmt.Print(c.(map[string]any)["text"])
+                    reply += c.(map[string]any)["text"].(string)
                 }
             }
         }
-        fmt.Println()
-        return nil
+        return id, reply, nil
     }
+}
+
+func main() {
+    ctx := context.Background()
+    client, _ := google.DefaultClient(ctx, "https://www.googleapis.com/auth/cloud-platform")
+
+    // Turn 1
+    id1, reply1, _ := sendTurn(ctx, client, "My name is Alan. What is 12 factorial?", "")
+    fmt.Println(reply1)
+
+    // Turn 2 — agent remembers "Alan" from turn 1
+    _, reply2, _ := sendTurn(ctx, client, "What was my name?", id1)
+    fmt.Println(reply2)
 }
 ```
 
@@ -326,11 +377,26 @@ func callAgent(ctx context.Context, prompt string) error {
 | | |
 |---|---|
 | **Interaction URL** | `POST .../projects/{project}/locations/global/interactions` |
-| **Interaction ID** | Returned in the initial response; use to poll |
-| **Poll interval** | 2s is reasonable; the API is async with no push notification |
-| **Auth header** | Bearer token from Google OAuth2 (`cloud-platform` scope) |
-| **Session / multi-turn** | Each interaction is independent; there is no built-in conversation thread |
-| **No public endpoint** | There is no `https://my-agent.run` — all calls go through the Vertex AI API |
+| **Interaction ID** | Returned in the initial response; use to poll and for multi-turn |
+| **Multi-turn** | Pass `store: true` on turn 1, then `previous_interaction_id: <id>` on follow-ups |
+| **Streaming** | Pass `stream: true` for SSE chunks (not yet wired into this CLI's `verify`) |
+| **Poll interval** | 2s is reasonable; managed agents require `background: true` |
+| **Auth** | Bearer token from Google OAuth2 (`cloud-platform` scope) |
+| **No public endpoint** | No `https://my-agent.run` — all calls go through the Vertex AI API |
+| **Official SDK** | `google-genai >= 2.0.0` with `GOOGLE_GENAI_USE_ENTERPRISE=true` |
+
+### Known gaps vs. the full API
+
+This CLI covers the **control plane** (create/update/delete/list agents). The full
+interactions API has capabilities not yet exposed here:
+
+| Feature | API support | This CLI |
+|---|---|---|
+| Single-turn interactions | ✓ | ✓ via `verify` |
+| Multi-turn (`previous_interaction_id`) | ✓ | Not in `verify` |
+| Streaming (SSE) | ✓ | Not in `verify` |
+| `skill_registry` GCS source type | ✓ | GCS only |
+| Function calling tools | ✓ | N/A (agent-side) |
 
 ### A2A integration (roadmap)
 
