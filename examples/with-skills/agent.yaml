@@ -1,0 +1,6 @@
+id: "skilled-agent"
+description: "An agent with a custom math skill"
+project_id: "alanblount-sandbox"
+gcs_bucket: "alanblount-sandbox-geap-testing"
+tools:
+  - type: "code_execution"

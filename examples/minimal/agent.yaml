@@ -1,0 +1,5 @@
+id: "minimal-agent"
+description: "A minimal agent with search and code execution"
+tools:
+  - type: "code_execution"
+  - type: "google_search"
