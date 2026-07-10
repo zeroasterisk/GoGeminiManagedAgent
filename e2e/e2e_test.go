@@ -110,6 +110,17 @@ func interact(t *testing.T, b *builder.Builder, prompt string) string {
 	return "ok"
 }
 
+func a2aStreamMessage(t *testing.T, b *builder.Builder, prompt string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	t.Logf("Prompt: %q", prompt)
+	if err := b.StreamMessage(ctx, prompt, false); err != nil {
+		t.Fatalf("StreamMessage: %v", err)
+	}
+	return "ok"
+}
+
 // ── Test cases ────────────────────────────────────────────────────────────────
 
 // TestE2E_Minimal deploys the minimal example (search + code_execution)
@@ -118,6 +129,14 @@ func TestE2E_Minimal(t *testing.T) {
 	cfg := loadCfg(t, "minimal")
 	b := deployAndCleanup(t, cfg, exampleDir("minimal"))
 	interact(t, b, "What is 12 factorial? Use code to compute it.")
+}
+
+// TestE2E_MinimalA2A is TestE2E_Minimal over A2A: same deploy and prompt, but
+// talks to the agent via message:stream instead of the Interactions API.
+func TestE2E_MinimalA2A(t *testing.T) {
+	cfg := loadCfg(t, "minimal")
+	b := deployAndCleanup(t, cfg, exampleDir("minimal"))
+	a2aStreamMessage(t, b, "What is 12 factorial? Use code to compute it.")
 }
 
 // TestE2E_URLContext deploys the url-context example and verifies the agent

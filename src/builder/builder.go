@@ -278,13 +278,10 @@ func (b *Builder) BuildAndDeploy(ctx context.Context) error {
 			Headers: t.Headers,
 		})
 	}
-	if len(sources) > 0 {
-		allowlist := b.buildAllowlist()
-		payload.BaseEnvironment = &BaseEnvironmentPayload{
-			Type:    "remote",
-			Sources: sources,
-			Network: &NetworkConfigPayload{Allowlist: allowlist},
-		}
+	payload.BaseEnvironment = &BaseEnvironmentPayload{
+		Type:    "remote",
+		Sources: sources,
+		Network: &NetworkConfigPayload{Allowlist: b.buildAllowlist()},
 	}
 
 	return b.deployAgent(ctx, payload)
