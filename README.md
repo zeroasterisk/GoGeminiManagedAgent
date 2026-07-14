@@ -1,28 +1,40 @@
 # GoGeminiManagedAgent
 
-A deploy CLI for [Gemini Enterprise Managed Agents](https://cloud.google.com/gemini/docs/managed-agents)
-— describe your agent in a directory, run one command, it's live.
+The fastest path to a running [Gemini Enterprise Managed Agent](https://cloud.google.com/gemini/docs/managed-agents):
+two files, one command.
+
+```
+my-agent/agent.yaml + instructions.md  →  deploy  →  live agent
+```
 
 ---
 
-## What this is
+## What this is — and what it isn't
 
-[Gemini Enterprise Agent Platform (GEAP)](https://cloud.google.com/gemini/docs/managed-agents)
-is Google's fully-managed runtime for agentic AI: it provisions sandboxes, executes tool
-calls, and handles the infrastructure. The gap is the **deploy loop** — going from a local
-directory to a running agent without hand-crafting JSON or clicking through a console.
+**[Gemini Enterprise Agent Platform (GEAP)](https://cloud.google.com/gemini/docs/managed-agents)**
+is Google's fully-managed agent runtime. It provisions sandboxes on demand, executes
+tool calls, and handles the infrastructure. You bring the definition; Google runs it.
 
-This tool fills that gap. It is inspired by [Vercel's `eve` framework](https://vercel.com/blog/introducing-eve):
-the idea that **an agent is a directory**, and a CLI should be all you need to go from
-that directory to something running in production.
+There are two other tools in this space. This one occupies a different position than
+either of them:
 
-```
-write files  →  geap-managed-agents-builder deploy  →  live agent
-```
+| Tool | What it does | Who it's for |
+|---|---|---|
+| **[`google-agents-cli`](https://github.com/google/agents-cli)** + ADK | Full agent development lifecycle — scaffold Python/TypeScript code, evals, deploy to Cloud Run / GKE, publish to Gemini Enterprise | Developers building agents *as code* |
+| **[`gemini-agents-api` skill](https://github.com/google/skills/tree/main/skills/cloud/gemini-agents-api)** | Reference doc: the exact API calls to manage agents | AI coding agents that need the raw API shape |
+| **This tool** | `terraform apply` for the managed-agents control plane — your agent definition lives in plain files, one command deploys or updates it | Anyone who wants a live agent without writing code or hand-crafting JSON |
 
-The analogy is to `vercel deploy`, not to the full `eve` framework. `eve` is a complete
-agent runtime with durable sessions, channels, evals, and scheduling. GEAP provides the
-equivalent runtime on Google Cloud — and this CLI is the `vercel deploy` step for it.
+The inspiration is [`vercel deploy`](https://vercel.com/blog/introducing-eve) — not the
+full `eve` runtime (GEAP provides the equivalent), but the deploy step: a directory *is*
+the deployment unit, a CLI is all you need, and re-running it is always safe.
+
+**What this tool does that the alternatives don't:**
+
+- `agent.yaml` + `instructions.md` = your agent in git, diffable, reviewable, portable
+- One command handles POST-or-PATCH, LRO polling, and GCS file upload atomically
+- Config validated locally before any API call (bad IDs, wrong location, unsupported tools)
+- `list` shows everything deployed in your project
+- e2e test harness: `go test -tags e2e` verifies real deployments in CI
 
 ---
 
