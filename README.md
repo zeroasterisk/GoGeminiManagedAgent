@@ -61,9 +61,9 @@ This is the most important thing to understand before you start:
 │  Resource name:                                                      │
 │  projects/{project}/locations/global/agents/{id}                     │
 │                                                                      │
-│  ⚠ No public URL. Callable only through the Vertex AI REST API      │
-│    with a Google OAuth token (service account or ADC).               │
-│    An A2A bridge is on the roadmap — see "Using your agent" below.   │
+│  ⚠ No public URL. Callable via the Interactions API or A2A —         │
+│    both are the Vertex AI REST API with a Google OAuth token         │
+│    (service account or ADC). See "Talk to it" below.                 │
 └──────────────────┬──────────────────────────────────────────────────┘
                    │ per-interaction sandbox provisioned on demand
                    ▼
@@ -145,11 +145,21 @@ GEMINI_PROJECT_ID=my-gcp-project \
   -prompt "What is 12 factorial? Use code."
 ```
 
-> **Coming soon:** an A2A bridge will expose each managed agent as a standard
-> [A2A](https://github.com/a2aproject/A2A) endpoint so any A2A-capable client
-> (ADK, LangGraph, etc.) can discover and call your deployed agents without
-> touching the Vertex AI API directly. Until then, see "Using your agent from
-> code" below.
+`verify` speaks the raw Interactions API by default. To talk to the same agent
+over **A2A** instead — the standard
+[A2A](https://github.com/a2aproject/A2A) protocol any A2A client understands —
+pass `-protocol a2a`:
+
+```bash
+GEMINI_PROJECT_ID=my-gcp-project \
+  geap-managed-agents-builder verify -dir ./examples/minimal -protocol a2a \
+  -prompt "What is 12 factorial? Use code."
+```
+
+Each managed agent is exposed at
+`.../agents/{id}/a2a/v1` (A2A v1, HTTP+JSON), so any A2A-capable client
+can call your deployed agents. This CLI uses the
+[a2a-go](https://github.com/a2aproject/a2a-go) SDK under the hood.
 
 ---
 
@@ -230,7 +240,7 @@ projects/{PROJECT_ID}/locations/global/agents/{AGENT_ID}
 
 ### Official SDK (Python / TypeScript)
 
-The official `google-genai >= 2.0.0` SDK has first-class support for the interactions API:
+The official `google-genai >= 2.0.0` SDK has first-class support for the Interactions API:
 
 ```bash
 pip install "google-genai>=2.0.0"
@@ -266,7 +276,7 @@ print(turn2.steps[-1].content[0].text)  # "Your name is Alan."
 ```
 
 > The legacy SDKs (`google-cloud-aiplatform`, `google-generativeai`) do **not** support
-> the interactions API. Use `google-genai >= 2.0.0`.
+> the Interactions API. Use `google-genai >= 2.0.0`.
 
 ### Auth
 
@@ -283,7 +293,7 @@ gcloud projects add-iam-policy-binding PROJECT_ID \
   --role="roles/aiplatform.user"
 ```
 
-### Calling the interactions API directly (Go / any language)
+### Calling the Interactions API directly (Go / any language)
 
 For Go or any language without an official SDK, use the REST API directly:
 
@@ -391,7 +401,7 @@ func main() {
 | **Interaction URL** | `POST .../projects/{project}/locations/global/interactions` |
 | **Interaction ID** | Returned in the initial response; use to poll and for multi-turn |
 | **Multi-turn** | Pass `store: true` on turn 1, then `previous_interaction_id: <id>` on follow-ups |
-| **Streaming** | Pass `stream: true` for SSE chunks (not yet wired into this CLI's `verify`) |
+| **Streaming** | `verify -protocol a2a` streams via `message:stream` (SSE) |
 | **Poll interval** | 2s is reasonable; managed agents require `background: true` |
 | **Auth** | Bearer token from Google OAuth2 (`cloud-platform` scope) |
 | **No public endpoint** | No `https://my-agent.run` — all calls go through the Vertex AI API |
@@ -400,29 +410,37 @@ func main() {
 ### Known gaps vs. the full API
 
 This CLI covers the **control plane** (create/update/delete/list agents). The full
-interactions API has capabilities not yet exposed here:
+Interactions API has capabilities not yet exposed here:
 
 | Feature | API support | This CLI |
 |---|---|---|
-| Single-turn interactions | ✓ | ✓ via `verify` |
+| Single-turn interactions | ✓ | ✓ via `verify` (interactions or `-protocol a2a`) |
 | Multi-turn (`previous_interaction_id`) | ✓ | Not in `verify` |
-| Streaming (SSE) | ✓ | Not in `verify` |
+| Streaming (SSE) | ✓ | ✓ via `verify -protocol a2a` |
+| A2A (`message:stream`) | ✓ | ✓ via `verify -protocol a2a` |
 | `skill_registry` GCS source type | ✓ | GCS only |
 | Function calling tools | ✓ | N/A (agent-side) |
 
-### A2A integration (roadmap)
+### A2A integration
 
 [A2A (Agent-to-Agent)](https://github.com/a2aproject/A2A) is an open standard
 (Google-initiated, 50+ partners including Atlassian, Salesforce, LangChain, MongoDB)
-that lets agents advertise capabilities via an **Agent Card** and accept tasks over HTTP
-without the caller knowing the underlying platform.
+that lets agents advertise capabilities and accept tasks over HTTP without the caller
+knowing the underlying platform.
 
-> **Roadmap:** Google is building an A2A bridge for Gemini managed agents. Once it
-> ships, every agent deployed by this CLI will automatically get a standard A2A endpoint
-> and Agent Card — meaning any A2A-capable client (ADK, LangGraph, Autogen, custom)
-> can discover and call your agents without Vertex AI API knowledge or Google OAuth.
->
-> Until then, the Vertex AI REST API (shown above) is the integration path.
+Every agent deployed by this CLI is reachable as an A2A v1 (HTTP+JSON) endpoint at:
+
+```
+https://aiplatform.googleapis.com/v1beta1/projects/{project}/locations/global/agents/{id}/a2a/v1
+```
+
+Any A2A client can call it. This CLI uses the
+[a2a-go](https://github.com/a2aproject/a2a-go) SDK — `verify -protocol a2a` sends
+`message:stream` and prints the reply as it streams in (SSE). Auth is the same Google
+OAuth `cloud-platform` token as every other call; the SDK's REST transport is handed a
+credentialed `http.Client`.
+
+Multi-turn over A2A (task/context continuation) is not yet wired into `verify`.
 
 ---
 
@@ -480,7 +498,7 @@ tools:
 ## CLI reference
 
 ```
-geap-managed-agents-builder [flags] <command>
+geap-managed-agents-builder [command] [flags]
 
 Commands:
   deploy   Create or update the agent (default)
@@ -489,9 +507,10 @@ Commands:
   list     List all agents in the project
 
 Flags:
-  -dir string     Agent config directory (default ".")
-  -prompt string  Prompt for the verify command (default "Hello")
-  -verbose        Print raw JSON response (verify only)
+  -dir string       Agent config directory (default ".")
+  -prompt string    Prompt for the verify command (default "Hello")
+  -protocol string  Transport for verify: "interactions" (default) or "a2a"
+  -verbose          Print raw JSON response (verify only)
 ```
 
 ---
@@ -535,7 +554,7 @@ go test ./src/...
 go test -race ./src/...
 ```
 
-All API calls are mocked with `net/http/httptest`. 43 tests.
+All API calls (Interactions and A2A) are mocked with `net/http/httptest`.
 
 ### End-to-end tests (real GCP project required)
 
@@ -551,6 +570,9 @@ go test -tags e2e ./e2e/... -v -timeout 5m -run TestE2E_Minimal
 go test -tags e2e ./e2e/... -v -timeout 5m -run TestE2E_WithSkills
 go test -tags e2e ./e2e/... -v -timeout 5m -run TestE2E_DeployIdempotent
 go test -tags e2e ./e2e/... -v -timeout 5m -run TestE2E_Delete
+
+# Same as TestE2E_Minimal but over A2A (message:stream)
+go test -tags e2e ./e2e/... -v -timeout 5m -run TestE2E_MinimalA2A
 ```
 
 Each e2e test deploys a uniquely-named agent, runs a real interaction, and deletes the

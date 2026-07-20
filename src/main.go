@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/zeroasterisk/GoGeminiManagedAgent/src/builder"
@@ -14,7 +15,7 @@ import (
 const usage = `geap-managed-agents-builder - deploy Gemini Enterprise Managed Agents
 
 Usage:
-  geap-managed-agents-builder [flags] <command>
+  geap-managed-agents-builder [command] [flags]
 
 Commands:
   deploy   Create or update the agent from the config directory (default)
@@ -23,42 +24,49 @@ Commands:
   list     List all agents in the project
 
 Flags:
-  -dir string     Agent config directory (default "."); not required for list
-  -prompt string  Prompt for the verify command (default "Hello")
-  -verbose        Print raw JSON response (verify only)
+  -dir string       Agent config directory (default "."); not required for list
+  -prompt string    Prompt for the verify command (default "Hello")
+  -protocol string  Transport for verify: "interactions" (default) or "a2a"
+  -verbose          Print raw JSON response (verify only)
 
 Environment:
   GEMINI_PROJECT_ID   GCP project ID (overrides project_id in agent.yaml)
   GEMINI_LOCATION     Location (must be "global"; overrides location in agent.yaml)
 
 Examples:
-  # Deploy or update an agent
-  geap-managed-agents-builder -dir ./examples/minimal
+  # Deploy or update an agent (deploy is the default command)
+  geap-managed-agents-builder deploy -dir ./examples/minimal
 
-  # Send a test prompt
-  geap-managed-agents-builder -dir ./examples/minimal verify -prompt "What is 2+2?"
+  # Send a test prompt (raw Interactions API)
+  geap-managed-agents-builder verify -dir ./examples/minimal -prompt "What is 2+2?"
+
+  # Send a test prompt over A2A (message:stream, SSE)
+  geap-managed-agents-builder verify -dir ./examples/minimal -protocol a2a -prompt "What is 2+2?"
 
   # List all agents in a project
   GEMINI_PROJECT_ID=my-project geap-managed-agents-builder list
 
   # Delete an agent
-  geap-managed-agents-builder -dir ./examples/minimal delete
+  geap-managed-agents-builder delete -dir ./examples/minimal
 `
 
 func main() {
 	fs := flag.NewFlagSet("geap", flag.ExitOnError)
 	dirFlag := fs.String("dir", ".", "Agent config directory")
 	promptFlag := fs.String("prompt", "Hello", "Prompt for verify command")
+	protocolFlag := fs.String("protocol", "interactions", "Transport for verify: interactions or a2a")
 	verboseFlag := fs.Bool("verbose", false, "Print raw JSON response")
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 
-	if err := fs.Parse(os.Args[1:]); err != nil {
-		os.Exit(1)
-	}
-
+	// Subcommand comes first (like `go build`, `git push`); its flags follow it.
+	// With no subcommand, default to deploy so `... -dir x` still works.
+	args := os.Args[1:]
 	cmd := "deploy"
-	if args := fs.Args(); len(args) > 0 {
-		cmd = args[0]
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		cmd, args = args[0], args[1:]
+	}
+	if err := fs.Parse(args); err != nil {
+		os.Exit(1)
 	}
 
 	ctx := context.Background()
@@ -99,9 +107,21 @@ func main() {
 		fmt.Println("Deployment complete.")
 
 	case "verify":
-		fmt.Printf("Verifying agent %q...\n", cfg.ID)
-		if err := b.Interact(ctx, *promptFlag, *verboseFlag); err != nil {
-			fmt.Fprintf(os.Stderr, "Verify failed: %v\n", err)
+		switch strings.ToLower(*protocolFlag) {
+		case "interactions":
+			fmt.Printf("Verifying agent %q...\n", cfg.ID)
+			if err := b.Interact(ctx, *promptFlag, *verboseFlag); err != nil {
+				fmt.Fprintf(os.Stderr, "Verify failed: %v\n", err)
+				os.Exit(1)
+			}
+		case "a2a":
+			fmt.Printf("Verifying agent %q via A2A...\n", cfg.ID)
+			if err := b.StreamMessage(ctx, *promptFlag, *verboseFlag); err != nil {
+				fmt.Fprintf(os.Stderr, "Verify failed: %v\n", err)
+				os.Exit(1)
+			}
+		default:
+			fmt.Fprintf(os.Stderr, "Error: unknown -protocol %q (want \"interactions\" or \"a2a\")\n", *protocolFlag)
 			os.Exit(1)
 		}
 

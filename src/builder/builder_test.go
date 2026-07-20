@@ -521,7 +521,7 @@ func TestDeployAgent_409Race_FallsBackToPatch(t *testing.T) {
 
 // ── Payload shape assertions ──────────────────────────────────────────────────
 
-func TestPayload_NoBaseEnvironment_WhenNoBucket(t *testing.T) {
+func TestPayload_BaseEnvironment_AlwaysSet(t *testing.T) {
 	var gotBody AgentPayload
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
@@ -539,8 +539,21 @@ func TestPayload_NoBaseEnvironment_WhenNoBucket(t *testing.T) {
 	if err := b.BuildAndDeploy(context.Background()); err != nil {
 		t.Fatalf("BuildAndDeploy: %v", err)
 	}
-	if gotBody.BaseEnvironment != nil {
-		t.Error("expected nil BaseEnvironment when no GCS bucket")
+	// The remote base_environment is attached even without a bucket (matching
+	// the managed-agents create sample); it just carries no GCS sources.
+	if gotBody.BaseEnvironment == nil {
+		t.Fatal("expected base_environment to be set even without a GCS bucket")
+	}
+	if gotBody.BaseEnvironment.Type != "remote" {
+		t.Errorf("base_environment.type: got %q, want %q", gotBody.BaseEnvironment.Type, "remote")
+	}
+	if len(gotBody.BaseEnvironment.Sources) != 0 {
+		t.Errorf("expected no sources without a bucket, got %+v", gotBody.BaseEnvironment.Sources)
+	}
+	if gotBody.BaseEnvironment.Network == nil ||
+		len(gotBody.BaseEnvironment.Network.Allowlist) != 1 ||
+		gotBody.BaseEnvironment.Network.Allowlist[0].Domain != "*" {
+		t.Errorf("expected network allowlist [{*}], got %+v", gotBody.BaseEnvironment.Network)
 	}
 }
 
