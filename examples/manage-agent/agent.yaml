@@ -1,0 +1,27 @@
+id: "gcp-fleet-manager"
+description: "Administers managed agents deployed under a GCP project: lists them, inspects config, and reports on other project resources."
+project_id: "alanblount-sandbox"
+gcs_bucket: "alanblount-sandbox-geap-testing"
+
+# This agent uses a companion MCP server (see ./mcp-server/) that runs on your
+# own infra (Cloud Run, a GCE VM, wherever) with Application Default
+# Credentials for your GCP project. It exposes read tools for:
+#   - list_agents / get_agent   (Vertex AI managed agents in this project)
+#   - list_compute_instances    (GCE VMs)
+#   - get_project_info          (project metadata)
+#
+# IMPORTANT: the mcp_server tool requires a genuine https:// URL with a valid
+# TLS cert -- plain http:// silently fails ("Internal error encountered", no
+# tool call ever attempted). mcp-server/main.go has a built-in -tls-host flag
+# that gets a free Let's Encrypt cert via ACME HTTP-01 (works great with a
+# <public-ip>.nip.io hostname, no DNS setup needed) -- see mcp-server/README.md.
+#
+# Deploy the server first, put its URL + auth token below, then deploy this
+# agent.
+tools:
+  - type: "mcp_server"
+    name: "gcp-fleet"
+    url: "https://YOUR_MCP_SERVER_HOST/"
+    headers:
+      Authorization: "Bearer YOUR_MCP_AUTH_TOKEN"
+  - type: "code_execution"

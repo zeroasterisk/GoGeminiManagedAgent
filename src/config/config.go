@@ -18,6 +18,7 @@ var idPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,61}[a-z0-9]$`)
 // Reference: confirmed against API error messages on 2026-07-08.
 var validToolTypes = map[string]bool{
 	"code_execution": true,
+	"endpoint":       true,
 	"filesystem":     true,
 	"google_search":  true,
 	"mcp_server":     true,
@@ -107,6 +108,9 @@ func (c *AgentConfig) Validate() error {
 		}
 		if t.Type == "mcp_server" && t.URL == "" {
 			return fmt.Errorf("agent.yaml: tools[%d] type=mcp_server requires a url", i)
+		}
+		if t.Type == "endpoint" && t.Name == "" {
+			return fmt.Errorf("agent.yaml: tools[%d] type=endpoint requires a name (the tool's GCP resource name)", i)
 		}
 	}
 	for _, d := range c.Network.Allowlist {
