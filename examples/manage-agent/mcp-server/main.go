@@ -166,10 +166,9 @@ func errResult(err error) *mcp.CallToolResult {
 	}
 }
 
-// authMiddleware requires a valid "Authorization: Bearer <token>" header on
-// every request when MCP_AUTH_TOKEN is set. This server is meant to be
-// reachable from the public internet (the managed agent's sandbox calls it
-// over HTTPS as an mcp_server tool), so it must not be left open.
+// authMiddleware requires a valid "X-Mcp-Auth-Token" (or custom bearer) header
+// when MCP_AUTH_TOKEN is set. We check X-Mcp-Auth-Token first, then fallback to
+// Authorization: Bearer <token> if no Google ID token is present.
 func authMiddleware(token string, next http.Handler) http.Handler {
 	if token == "" {
 		log.Printf("WARNING: MCP_AUTH_TOKEN is not set; server is running with NO AUTH")
@@ -177,11 +176,13 @@ func authMiddleware(token string, next http.Handler) http.Handler {
 	}
 	want := "Bearer " + token
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != want {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		customHeader := r.Header.Get("X-Mcp-Auth-Token")
+		authHeader := r.Header.Get("Authorization")
+		if customHeader == token || authHeader == want {
+			next.ServeHTTP(w, r)
 			return
 		}
-		next.ServeHTTP(w, r)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	})
 }
 
