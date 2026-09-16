@@ -423,6 +423,9 @@ Interactions API has capabilities not yet exposed here:
 
 ### A2A integration
 
+> **Note on Availability (as of September 2026):**
+> The A2A endpoints (`/a2a/v1/...`) on managed agents are currently in **private preview** and not accessible to all Google Cloud projects. If a project has not been enrolled in the private preview, requests against these endpoints will fail. The Interactions API (`-protocol interactions`, default) is the standard method for general access.
+
 [A2A (Agent-to-Agent)](https://github.com/a2aproject/A2A) is an open standard
 (Google-initiated, 50+ partners including Atlassian, Salesforce, LangChain, MongoDB)
 that lets agents advertise capabilities and accept tasks over HTTP without the caller
