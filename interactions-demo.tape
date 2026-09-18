@@ -7,13 +7,13 @@ Set Padding 15
 Set Theme "Catppuccin Mocha"
 
 # 1. Deploy the agent with CLI
-Type "geap-managed-agents-builder deploy -dir ./examples/minimal"
+Type "gemini-managed-agents deploy -dir ./examples/minimal"
 Sleep 500ms
 Enter
 Sleep 4s
 
 # 2. Verify with CLI (Interactions API)
-Type "geap-managed-agents-builder verify -dir ./examples/minimal -prompt \"What is 15 factorial?\""
+Type "gemini-managed-agents verify -dir ./examples/minimal -prompt \"What is 15 factorial?\""
 Sleep 500ms
 Enter
 Sleep 5s

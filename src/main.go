@@ -12,10 +12,10 @@ import (
 	"github.com/zeroasterisk/GoGeminiManagedAgent/src/config"
 )
 
-const usage = `geap-managed-agents-builder - deploy Agent Platform Managed Agents
+const usage = `gemini-managed-agents - deploy Agent Platform Managed Agents
 
 Usage:
-  geap-managed-agents-builder [command] [flags]
+  gemini-managed-agents [command] [flags]
 
 Commands:
   deploy   Create or update the agent from the config directory (default)
@@ -34,24 +34,24 @@ Environment:
   GEMINI_LOCATION     Location (must be "global"; overrides location in agent.yaml)
 
 Examples:
-  # Deploy or update an agent (deploy is the default command)
-  geap-managed-agents-builder deploy -dir ./examples/minimal
+  # Deploy an agent directory
+  gemini-managed-agents deploy -dir ./examples/minimal
 
   # Send a test prompt (raw Interactions API)
-  geap-managed-agents-builder verify -dir ./examples/minimal -prompt "What is 2+2?"
+  gemini-managed-agents verify -dir ./examples/minimal -prompt "What is 2+2?"
 
-  # Send a test prompt over A2A (message:stream, SSE)
-  geap-managed-agents-builder verify -dir ./examples/minimal -protocol a2a -prompt "What is 2+2?"
+  # Send a test prompt over A2A protocol (SSE stream)
+  gemini-managed-agents verify -dir ./examples/minimal -protocol a2a -prompt "What is 2+2?"
 
   # List all agents in a project
-  GEMINI_PROJECT_ID=my-project geap-managed-agents-builder list
+  GEMINI_PROJECT_ID=my-project gemini-managed-agents list
 
   # Delete an agent
-  geap-managed-agents-builder delete -dir ./examples/minimal
+  gemini-managed-agents delete -dir ./examples/minimal
 `
 
 func main() {
-	fs := flag.NewFlagSet("geap", flag.ExitOnError)
+	fs := flag.NewFlagSet("gemini-managed-agents", flag.ExitOnError)
 	dirFlag := fs.String("dir", ".", "Agent config directory")
 	promptFlag := fs.String("prompt", "Hello", "Prompt for verify command")
 	protocolFlag := fs.String("protocol", "interactions", "Transport for verify: interactions or a2a")

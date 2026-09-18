@@ -55,7 +55,7 @@ This is the most important thing to understand before you start:
 │  ├── instructions.md     ← system prompt                            │
 │  └── skills/             ← playbooks the agent reads at runtime     │
 │                                                                      │
-│  geap-managed-agents-builder deploy   ◄── this tool                 │
+│  gemini-managed-agents deploy   ◄── this tool                 │
 └──────────────────┬──────────────────────────────────────────────────┘
                    │ uploads files to GCS, calls Vertex AI API
                    ▼
@@ -103,8 +103,8 @@ This is the most important thing to understand before you start:
 ```bash
 git clone https://github.com/zeroasterisk/GoGeminiManagedAgent.git
 cd GoGeminiManagedAgent
-go build -o geap-managed-agents-builder ./src
-mv geap-managed-agents-builder /usr/local/bin/   # optional
+go build -o gemini-managed-agents ./src
+mv gemini-managed-agents /usr/local/bin/   # optional
 ```
 
 **One-liner (auto-installs Go if needed):**
@@ -123,13 +123,13 @@ gcloud auth application-default login
 
 ```bash
 GEMINI_PROJECT_ID=my-gcp-project \
-  geap-managed-agents-builder deploy -dir ./examples/minimal
+  gemini-managed-agents deploy -dir ./examples/minimal
 ```
 
 ### 4. See what's deployed
 
 ```bash
-GEMINI_PROJECT_ID=my-gcp-project geap-managed-agents-builder list
+GEMINI_PROJECT_ID=my-gcp-project gemini-managed-agents list
 ```
 
 ```
@@ -145,7 +145,7 @@ research-agent   Research and data assistant.       url_context, mcp_server     
 
 ```bash
 GEMINI_PROJECT_ID=my-gcp-project \
-  geap-managed-agents-builder verify -dir ./examples/minimal \
+  gemini-managed-agents verify -dir ./examples/minimal \
   -prompt "What is 12 factorial? Use code."
 ```
 
@@ -164,7 +164,7 @@ Once enrolled, you can speak to any deployed agent directly over A2A by passing 
 
 ```bash
 GEMINI_PROJECT_ID=my-gcp-project \
-  geap-managed-agents-builder verify -dir ./examples/minimal -protocol a2a \
+  gemini-managed-agents verify -dir ./examples/minimal -protocol a2a \
   -prompt "What is 12 factorial? Use code."
 ```
 
@@ -230,10 +230,10 @@ Always say which tool you are using and why.
 ```
 
 ```bash
-geap-managed-agents-builder deploy -dir ./my-agent
-geap-managed-agents-builder verify -dir ./my-agent -prompt "Summarise https://go.dev in 3 bullets."
-geap-managed-agents-builder list            # see all agents in the project
-geap-managed-agents-builder delete -dir ./my-agent
+gemini-managed-agents deploy -dir ./my-agent
+gemini-managed-agents verify -dir ./my-agent -prompt "Summarise https://go.dev in 3 bullets."
+gemini-managed-agents list            # see all agents in the project
+gemini-managed-agents delete -dir ./my-agent
 ```
 
 ---
@@ -512,7 +512,7 @@ tools:
 ## CLI reference
 
 ```
-geap-managed-agents-builder [command] [flags]
+gemini-managed-agents [command] [flags]
 
 Commands:
   deploy   Create or update the agent (default)

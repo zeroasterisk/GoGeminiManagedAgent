@@ -28,11 +28,11 @@ Set your GCP project ID and deploy directly with the CLI:
 export GEMINI_PROJECT_ID="your-gcp-project-id"
 
 # 1. Deploy the minimal agent
-geap-managed-agents-builder deploy -dir ./examples/minimal
+gemini-managed-agents deploy -dir ./examples/minimal
 
-# 2. Verify with a prompt
-geap-managed-agents-builder verify -dir ./examples/minimal -prompt "What is 15 factorial? Verify with code."
+# 2. Verify with a prompt (Interactions API)
+gemini-managed-agents verify -dir ./examples/minimal -prompt "What is 15 factorial? Verify with code."
 
 # 3. Verify an A2A-capable agent over the A2A protocol (requires private preview access)
-geap-managed-agents-builder verify -dir ./examples/a2a-agent -protocol a2a -prompt "Summarize Go 1.27 release highlights."
+gemini-managed-agents verify -dir ./examples/a2a-agent -protocol a2a -prompt "Summarize Go 1.27 release highlights."
 ```

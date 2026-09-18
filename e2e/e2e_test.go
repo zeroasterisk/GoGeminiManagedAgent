@@ -92,22 +92,20 @@ func deployAndCleanup(t *testing.T, cfg *config.AgentConfig, dir string) *builde
 	return b
 }
 
-// interact sends a prompt and returns the text of the first model_output step.
+// interact sends a prompt, checks for successful execution, and returns the response text.
 func interact(t *testing.T, b *builder.Builder, prompt string) string {
 	t.Helper()
-	// Capture stdout by redirecting — we use verbose=false and capture via
-	// a simple pipe trick. Since builder prints to stdout, we use -v output.
-	// For assertion purposes we re-run via the exported Interact which prints
-	// to stdout; integration tests validate success (no error) + log output.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	t.Logf("Prompt: %q", prompt)
-	if err := b.Interact(ctx, prompt, false); err != nil {
+	text, err := b.InteractWithResult(ctx, prompt, false)
+	if err != nil {
 		t.Fatalf("Interact: %v", err)
 	}
-	// Response text is printed to stdout by Interact; we return a sentinel
-	// so callers can chain assertions without needing to capture stdout.
-	return "ok"
+	if strings.TrimSpace(text) == "" {
+		t.Fatalf("Interact returned empty response text")
+	}
+	return text
 }
 
 func a2aStreamMessage(t *testing.T, b *builder.Builder, prompt string) string {
@@ -115,20 +113,27 @@ func a2aStreamMessage(t *testing.T, b *builder.Builder, prompt string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	t.Logf("Prompt: %q", prompt)
-	if err := b.StreamMessage(ctx, prompt, false); err != nil {
+	text, err := b.StreamMessageWithResult(ctx, prompt, false)
+	if err != nil {
 		t.Fatalf("StreamMessage: %v", err)
 	}
-	return "ok"
+	if strings.TrimSpace(text) == "" {
+		t.Fatalf("StreamMessage returned empty response text")
+	}
+	return text
 }
 
 // ── Test cases ────────────────────────────────────────────────────────────────
 
 // TestE2E_Minimal deploys the minimal example (search + code_execution)
-// and verifies it can answer a simple factual question.
+// and verifies it can answer a calculation prompt over the standard Interactions API.
 func TestE2E_Minimal(t *testing.T) {
 	cfg := loadCfg(t, "minimal")
 	b := deployAndCleanup(t, cfg, exampleDir("minimal"))
-	interact(t, b, "What is 12 factorial? Use code to compute it.")
+	resp := interact(t, b, "What is 12 factorial? Use code to compute it.")
+	if !strings.Contains(resp, "479001600") && !strings.Contains(resp, "479,001,600") {
+		t.Errorf("expected 479001600 in response, got: %s", resp)
+	}
 }
 
 // TestE2E_MinimalA2A is TestE2E_Minimal over A2A: same deploy and prompt, but
@@ -136,7 +141,10 @@ func TestE2E_Minimal(t *testing.T) {
 func TestE2E_MinimalA2A(t *testing.T) {
 	cfg := loadCfg(t, "minimal")
 	b := deployAndCleanup(t, cfg, exampleDir("minimal"))
-	a2aStreamMessage(t, b, "What is 12 factorial? Use code to compute it.")
+	resp := a2aStreamMessage(t, b, "What is 12 factorial? Use code to compute it.")
+	if !strings.Contains(resp, "479001600") && !strings.Contains(resp, "479,001,600") {
+		t.Errorf("expected 479001600 in response, got: %s", resp)
+	}
 }
 
 // TestE2E_URLContext deploys the url-context example and verifies the agent

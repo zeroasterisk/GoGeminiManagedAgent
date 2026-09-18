@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,9 +21,16 @@ func (b *Builder) a2aEndpointURL() string {
 // StreamMessage streams the reply from the agent over A2A (message:stream) and
 // prints text as it arrives. It is the A2A equivalent of Interact.
 func (b *Builder) StreamMessage(ctx context.Context, prompt string, verbose bool) error {
+	_, err := b.StreamMessageWithResult(ctx, prompt, verbose)
+	return err
+}
+
+// StreamMessageWithResult streams the reply from the agent over A2A (message:stream),
+// prints text as it arrives, and returns the aggregated text response.
+func (b *Builder) StreamMessageWithResult(ctx context.Context, prompt string, verbose bool) (string, error) {
 	httpClient, err := b.getClient(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	endpoint := a2a.NewAgentInterface(b.a2aEndpointURL(), a2a.TransportProtocolHTTPJSON)
@@ -34,7 +42,7 @@ func (b *Builder) StreamMessage(ctx context.Context, prompt string, verbose bool
 		}),
 	)
 	if err != nil {
-		return fmt.Errorf("creating A2A client: %w", err)
+		return "", fmt.Errorf("creating A2A client: %w", err)
 	}
 	defer client.Destroy()
 
@@ -43,14 +51,16 @@ func (b *Builder) StreamMessage(ctx context.Context, prompt string, verbose bool
 	}
 	fmt.Printf("Sending A2A message:stream to agent %s...\n", b.cfg.ID)
 
-	printer := newA2AStreamPrinter(os.Stdout, isTerminal(os.Stdout))
+	var textBuffer bytes.Buffer
+	multiWriter := io.MultiWriter(os.Stdout, &textBuffer)
+	printer := newA2AStreamPrinter(multiWriter, isTerminal(os.Stdout))
 	for event, err := range client.SendStreamingMessage(ctx, req) {
 		if err != nil {
-			return fmt.Errorf("A2A message:stream: %w", err)
+			return "", fmt.Errorf("A2A message:stream: %w", err)
 		}
 		if verbose {
-			if err := printA2AJSON(os.Stdout, event); err != nil {
-				return err
+			if err := printA2AJSON(multiWriter, event); err != nil {
+				return "", err
 			}
 			continue
 		}
@@ -60,7 +70,7 @@ func (b *Builder) StreamMessage(ctx context.Context, prompt string, verbose bool
 		printer.flush()
 		fmt.Println()
 	}
-	return nil
+	return textBuffer.String(), nil
 }
 
 type a2aStreamPrinter struct {

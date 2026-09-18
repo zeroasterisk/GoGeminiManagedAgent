@@ -332,9 +332,15 @@ func (b *Builder) Delete(ctx context.Context) error {
 
 // Interact sends prompt to the deployed agent and prints the response.
 func (b *Builder) Interact(ctx context.Context, prompt string, verbose bool) error {
+	_, err := b.InteractWithResult(ctx, prompt, verbose)
+	return err
+}
+
+// InteractWithResult sends prompt to the deployed agent, prints the response, and returns the aggregated text.
+func (b *Builder) InteractWithResult(ctx context.Context, prompt string, verbose bool) (string, error) {
 	client, err := b.getClient(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	agentRef := fmt.Sprintf("projects/%s/locations/%s/agents/%s", b.cfg.ProjectID, b.cfg.Location, b.cfg.ID)
@@ -353,7 +359,7 @@ func (b *Builder) Interact(ctx context.Context, prompt string, verbose bool) err
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	interactURL := fmt.Sprintf("%s/projects/%s/locations/%s/interactions", b.apiBase, b.cfg.ProjectID, b.cfg.Location)
@@ -361,30 +367,30 @@ func (b *Builder) Interact(ctx context.Context, prompt string, verbose bool) err
 	fmt.Printf("Sending prompt to agent %s...\n", b.cfg.ID)
 	req, err := http.NewRequestWithContext(ctx, "POST", interactURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Api-Revision", "2026-05-20")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("interaction failed (%d): %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("interaction failed (%d): %s", resp.StatusCode, string(respBody))
 	}
 
 	var initial map[string]interface{}
 	if err = json.Unmarshal(respBody, &initial); err != nil {
-		return fmt.Errorf("parsing initial response: %w", err)
+		return "", fmt.Errorf("parsing initial response: %w", err)
 	}
 
 	interactionID, ok := initial["id"].(string)
 	if !ok {
-		return fmt.Errorf("response did not contain interaction ID: %s", string(respBody))
+		return "", fmt.Errorf("response did not contain interaction ID: %s", string(respBody))
 	}
 
 	fmt.Printf("Interaction %s created. Polling...\n", interactionID)
@@ -396,28 +402,28 @@ func (b *Builder) Interact(ctx context.Context, prompt string, verbose bool) err
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", ctx.Err()
 		case <-ticker.C:
 			pollReq, err := http.NewRequestWithContext(ctx, "GET", pollURL, nil)
 			if err != nil {
-				return err
+				return "", err
 			}
 			pollReq.Header.Set("Api-Revision", "2026-05-20")
 
 			pollResp, err := client.Do(pollReq)
 			if err != nil {
-				return err
+				return "", err
 			}
 			pollBody, _ := io.ReadAll(pollResp.Body)
 			pollResp.Body.Close()
 
 			if pollResp.StatusCode >= 400 {
-				return fmt.Errorf("polling failed (%d): %s", pollResp.StatusCode, string(pollBody))
+				return "", fmt.Errorf("polling failed (%d): %s", pollResp.StatusCode, string(pollBody))
 			}
 
 			var result map[string]interface{}
 			if err = json.Unmarshal(pollBody, &result); err != nil {
-				return fmt.Errorf("parsing poll response: %w", err)
+				return "", fmt.Errorf("parsing poll response: %w", err)
 			}
 
 			status, _ := result["status"].(string)
@@ -433,21 +439,24 @@ func (b *Builder) Interact(ctx context.Context, prompt string, verbose bool) err
 			} else {
 				var response InteractionResponse
 				if err = json.Unmarshal(pollBody, &response); err != nil {
-					return fmt.Errorf("parsing final response: %w", err)
+					return "", fmt.Errorf("parsing final response: %w", err)
 				}
 				fmt.Println("\nAgent Response:")
+				var responseText string
 				for _, step := range response.Steps {
 					if step.Type == "model_output" {
 						for _, content := range step.Content {
 							if content.Type == "text" {
 								fmt.Print(content.Text)
+								responseText += content.Text
 							}
 						}
 					}
 				}
 				fmt.Println()
+				return responseText, nil
 			}
-			return nil
+			return "", nil
 		}
 	}
 }
