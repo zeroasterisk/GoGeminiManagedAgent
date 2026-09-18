@@ -1,0 +1,37 @@
+id: "full-featured-agent"
+description: "Every supported tool type in one agent — use as a reference, not a production template."
+project_id: "my-gcp-project"
+gcs_bucket: "my-bucket"
+
+# Supported tool types (as of 2026-07-08):
+#
+#   code_execution   Python sandbox inside the ephemeral remote environment.
+#                    Output is ephemeral — files written here vanish after the
+#                    interaction unless explicitly sent back via MCP or GCS.
+#
+#   filesystem       R/W access to /workspace inside the sandbox.
+#                    Files are seeded from GCS (via gcs_bucket above) on start,
+#                    but changes are NOT automatically written back to GCS.
+#
+#   google_search    Grounded web search. No extra configuration.
+#
+#   url_context      Fetches and injects the content of URLs mentioned in
+#                    the conversation. No extra configuration.
+#
+#   mcp_server       Connects to an external Model Context Protocol server.
+#                    This is the path to durable integrations:
+#                    Drive, BigQuery, Databases, GitHub, Slack, etc.
+#                    The MCP server persists data; the sandbox does not.
+#
+# Network: currently only allowlist: ["*"] is supported (allow all outbound).
+
+tools:
+  - type: "code_execution"
+  - type: "filesystem"
+  - type: "google_search"
+  - type: "url_context"
+  - type: "mcp_server"
+    name: "my-data-server"
+    url: "https://your-mcp-server.example.com/mcp"
+    headers:
+      Authorization: "Bearer YOUR_MCP_TOKEN"

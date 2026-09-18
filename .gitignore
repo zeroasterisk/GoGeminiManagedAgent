@@ -1,0 +1,26 @@
+# Build output
+geap-managed-agents-builder
+
+# Go toolchain cache
+/vendor/
+
+# Test cache
+/testdata/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment / secrets
+.env
+*.json
+!go.sum
+
+# asdf local override (committed separately if desired)
+# .tool-versions

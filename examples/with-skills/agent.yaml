@@ -1,0 +1,12 @@
+id: "skilled-agent"
+description: "Skills loaded from GCS at runtime — shows the local→ephemeral→durable boundary."
+project_id: "my-gcp-project"
+gcs_bucket: "my-bucket"
+
+# Files in this directory (except agent.yaml) are uploaded to GCS and mounted
+# at /workspace inside the ephemeral remote sandbox on every interaction.
+# The agent can read them; they are NOT persisted between interactions unless
+# you write them back to GCS or an MCP-connected system.
+tools:
+  - type: "code_execution"
+  - type: "filesystem"

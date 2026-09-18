@@ -1,0 +1,8 @@
+id: "a2a-demo-agent"
+description: "A managed agent configured to receive inter-agent tasks via the A2A (Agent-to-Agent) protocol."
+project_id: "my-gcp-project"
+
+tools:
+  - type: "code_execution"
+  - type: "google_search"
+  - type: "url_context"

@@ -1,0 +1,7 @@
+id: "minimal-agent"
+description: "Search the web and run Python. No file system, no persistence."
+project_id: "my-gcp-project"
+
+tools:
+  - type: "google_search"
+  - type: "code_execution"
