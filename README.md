@@ -528,6 +528,7 @@ Flags:
 |---|---|
 | [`examples/minimal/`](examples/minimal/) | `google_search` + `code_execution`. No GCS, no persistence. The smallest possible agent. |
 | [`examples/a2a-agent/`](examples/a2a-agent/) | `google_search` + `code_execution` + `url_context`. Inter-agent task execution over A2A. |
+| [`examples/developer-knowledge-agent/`](examples/developer-knowledge-agent/) | `mcp_server` + `filesystem` + `code_execution`. Integrates Google's official Developer Knowledge MCP server with the `retrieving-developer-knowledge` skill playbook. |
 | [`examples/url-context/`](examples/url-context/) | `url_context` + `google_search`. Fetch and summarise live URLs. |
 | [`examples/with-skills/`](examples/with-skills/) | `code_execution` + `filesystem` + GCS-backed skill playbooks. |
 | [`examples/manage-agent/`](examples/manage-agent/) | `mcp_server` + `code_execution`. Companion MCP server to administer and inspect GCP agents. |

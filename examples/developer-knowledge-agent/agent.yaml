@@ -1,0 +1,24 @@
+id: "google-developer-expert"
+description: "Google Cloud and developer documentation expert, backed by the official Developer Knowledge MCP server and retrieving-developer-knowledge skill playbook."
+project_id: "my-gcp-project"
+gcs_bucket: "my-bucket"
+
+# Files in this directory (including the mounted skill at /workspace/skills/)
+# are uploaded to GCS and mounted into the runtime sandbox on each interaction.
+#
+# The Developer Knowledge MCP server provides real-time grounding in official
+# Google documentation across Google Cloud, Firebase, Android, and Web platforms.
+#
+# Prerequisite:
+# 1. Enable the API: gcloud services enable developerknowledge.googleapis.com --project=YOUR_PROJECT
+# 2. Create an API Key in Google Cloud Console with access to Developer Knowledge API.
+# 3. Supply your API Key in the X-Goog-Api-Key header below.
+tools:
+  - type: "mcp_server"
+    name: "developer-knowledge"
+    url: "https://developerknowledge.googleapis.com/mcp"
+    headers:
+      X-Goog-Api-Key: "YOUR_DEVELOPERKNOWLEDGE_API_KEY"
+  - type: "code_execution"
+  - type: "filesystem"
+  - type: "google_search"

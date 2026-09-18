@@ -12,6 +12,7 @@ Each subdirectory is a complete agent deployment unit consisting of an `agent.ya
 |---|---|---|
 | [`minimal/`](./minimal/) | Simplest possible deployment; fast factual lookup and computation | `google_search`, `code_execution` |
 | [`a2a-agent/`](./a2a-agent/) | Inter-agent communication via the A2A (Agent-to-Agent) protocol | `google_search`, `code_execution`, `url_context` |
+| [`developer-knowledge-agent/`](./developer-knowledge-agent/) | Grounded Google developer expert combining Google's official Developer Knowledge MCP server with the `retrieving-developer-knowledge` skill | `mcp_server`, `filesystem`, `code_execution`, `google_search` |
 | [`url-context/`](./url-context/) | Grounded reading and summarization of arbitrary live URLs | `url_context`, `google_search` |
 | [`with-skills/`](./with-skills/) | Mounting domain playbooks (`SKILL.md`) from GCS into the runtime filesystem | `filesystem`, `code_execution` |
 | [`manage-agent/`](./manage-agent/) | Dogfooding: an agent backed by an MCP server to inspect and manage other GCP agents | `mcp_server`, `code_execution` |
