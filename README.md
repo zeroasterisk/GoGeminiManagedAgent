@@ -9,7 +9,7 @@ two files, one command.
 my-agent/agent.yaml + instructions.md  →  deploy  →  live agent
 ```
 
-![GoGeminiManagedAgent A2A End-to-End Demo](docs/demo.gif)
+![GoGeminiManagedAgent Deploy & Interactions Demo](docs/interactions-demo.gif)
 
 ---
 
@@ -149,10 +149,18 @@ GEMINI_PROJECT_ID=my-gcp-project \
   -prompt "What is 12 factorial? Use code."
 ```
 
-`verify` speaks the raw Interactions API by default. To talk to the same agent
-over **A2A** instead — the standard
-[A2A](https://github.com/a2aproject/A2A) protocol any A2A client understands (as of Sept 2026 in private preview; [request access here](https://docs.google.com/forms/d/1gL56ROvlgczbMZ8VcgZE0RqIm9xvf61PRa4BsGQPzlo/edit?usp=send_form)) —
-pass `-protocol a2a`:
+`verify` speaks the raw Interactions API by default, sending the prompt to the managed agent runtime, polling the sandbox, executing tools, and outputting the final response.
+
+---
+
+## Inter-Agent Communication: A2A (Coming Soon)
+
+Every agent deployed on Agent Platform is designed to expose an endpoint for the open **[A2A (Agent-to-Agent)](https://github.com/a2aproject/A2A)** protocol, allowing autonomous agents to discover capabilities and delegate tasks to each other over HTTP.
+
+> **⚠️ Note on A2A Availability (as of Sept 2026):**  
+> The A2A endpoints (`/a2a/v1/...`) on managed agents are currently in **private preview** and not available to everyone. To request access to the A2A private preview, submit this form: **[Request A2A Access](https://docs.google.com/forms/d/1gL56ROvlgczbMZ8VcgZE0RqIm9xvf61PRa4BsGQPzlo/edit?usp=send_form)**. If your project is not enrolled in the private preview, invocation requests against the A2A endpoints will fail; use the standard Interactions API (`-protocol interactions`, the default) for general access.
+
+Once enrolled, you can speak to any deployed agent directly over A2A by passing `-protocol a2a`:
 
 ```bash
 GEMINI_PROJECT_ID=my-gcp-project \
@@ -160,10 +168,9 @@ GEMINI_PROJECT_ID=my-gcp-project \
   -prompt "What is 12 factorial? Use code."
 ```
 
-Each managed agent is exposed at
-`.../agents/{id}/a2a/v1` (A2A v1, HTTP+JSON), so any A2A-capable client
-can call your deployed agents. This CLI uses the
-[a2a-go](https://github.com/a2aproject/a2a-go) SDK under the hood.
+This CLI uses the official [a2a-go](https://github.com/a2aproject/a2a-go) SDK under the hood to stream JSON-RPC 2.0 events (`message:stream`) over SSE.
+
+![GoGeminiManagedAgent A2A End-to-End Demo](docs/demo.gif)
 
 ---
 
